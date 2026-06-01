@@ -10,6 +10,9 @@
 - `pi-todo` now owns the compact widget under the `pi-todo-compact` key while preserving the existing `todo_write`, `todo_read`, and `todo_remove` tool names and schemas.
 - Slash helper commands send auditable follow-up instructions through `todo_write` instead of mutating task state directly.
 
+### Fixed
+- Session loading no longer throws: `getBranchSafe()` wraps `ctx.sessionManager.getBranch()` in try/catch (returns `[]`) so `session_start` and `session_tree` recover gracefully when the branch is read before the session is initialised.
+
 ### Notes
 - Standalone `oh-my-todo` has been disabled by clearing its package `pi.extensions` list; reload Pi and trial normal todo workflows before archiving or deleting the folder.
 
