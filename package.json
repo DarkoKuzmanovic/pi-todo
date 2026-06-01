@@ -1,0 +1,41 @@
+{
+	"name": "@local/pi-todo",
+	"version": "0.8.2",
+	"description": "Pi extension: structured task list with live widget and system-prompt injection to prevent goal drift",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"pi-todo"
+	],
+	"type": "module",
+	"license": "MIT",
+	"author": "Darko Kuzmanovic",
+	"private": true,
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/DarkoKuzmanovic/pi-todo"
+	},
+	"scripts": {
+		"test": "vitest run"
+	},
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"vitest": "^4.1.6"
+	}
+}

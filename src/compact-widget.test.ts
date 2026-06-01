@@ -1,0 +1,497 @@
+import { describe, it, expect } from "vitest";
+import {
+	COMPACT_WIDGET_KEY,
+	updateCompactWidget,
+} from "./compact-widget";
+import { TaskTracker } from "./tracker";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { Task } from "./types";
+
+// ── Test helpers ────────────────────────────────────────────────────────────
+
+function makeTask(overrides: Partial<Task> = {}): Task {
+	return {
+		id: "t1",
+		content: "Test task",
+		status: "pending",
+		priority: "medium",
+		createdAt: 1000,
+		...overrides,
+	};
+}
+
+interface WidgetCall {
+	key: string;
+	factory: (tui: { width?: number }, theme: Theme) => CompactRenderable;
+	options: unknown;
+}
+
+interface CompactRenderable {
+	render: (renderWidth?: number) => string[];
+	invalidate: () => void;
+}
+
+interface CapturingContext {
+	ctx: ExtensionContext;
+	calls: WidgetCall[];
+}
+
+function buildContext(hasUI: boolean): CapturingContext {
+	const calls: WidgetCall[] = [];
+	const ctx = {
+		hasUI,
+		ui: {
+			setWidget(key: string, content: unknown, options: unknown) {
+				calls.push({
+					key,
+					factory: content as WidgetCall["factory"],
+					options,
+				});
+			},
+		},
+	};
+	return { ctx: ctx as unknown as ExtensionContext, calls };
+}
+
+const noopTheme = {
+	fg: (_color: string, text: string) => text,
+	bold: (text: string) => text,
+} as unknown as Theme;
+
+const capturingTheme = {
+	fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+	bold: (text: string) => `<b>${text}</b>`,
+} as unknown as Theme;
+
+const statefulTheme = {
+	fgColors: new Map<string, string>([
+		["muted", "M"],
+		["success", "S"],
+		["accent", "A"],
+		["dim", "D"],
+		["text", "T"],
+	]),
+	fg(color: string, text: string) {
+		return `${this.fgColors.get(color) ?? "?"}${text}`;
+	},
+	bold(text: string) {
+		return text;
+	},
+} as unknown as Theme;
+
+function renderWith(
+	tracker: TaskTracker,
+	options: {
+		renderWidth?: number;
+		tuiWidth?: number;
+		theme?: Theme;
+	} = {},
+): { lines: string[]; renderable: CompactRenderable } {
+	const { ctx, calls } = buildContext(true);
+	updateCompactWidget(ctx, tracker);
+	if (calls.length === 0) {
+		throw new Error("updateCompactWidget did not call setWidget");
+	}
+	const renderable = calls[0].factory(
+		{ width: options.tuiWidth },
+		options.theme ?? noopTheme,
+	);
+	const lines = renderable.render(options.renderWidth);
+	return { lines, renderable };
+}
+
+// ── Constants ───────────────────────────────────────────────────────────────
+
+describe("COMPACT_WIDGET_KEY", () => {
+	it('equals "pi-todo-compact"', () => {
+		expect(COMPACT_WIDGET_KEY).toBe("pi-todo-compact");
+	});
+
+	it("does not collide with the legacy pi-todo widget key or oh-my-todo key", () => {
+		expect(COMPACT_WIDGET_KEY).not.toBe("pi-todo");
+		expect(COMPACT_WIDGET_KEY).not.toBe("oh-my-todo");
+	});
+});
+
+// ── updateCompactWidget dispatch ────────────────────────────────────────────
+
+describe("updateCompactWidget — setWidget contract", () => {
+	it("no-ops when ctx.hasUI is false", () => {
+		const { ctx, calls } = buildContext(false);
+		const tracker = new TaskTracker(() => 1000);
+		tracker.reconstructFromDetails({
+			tasks: [makeTask({ id: "t1", status: "in_progress", startedAt: 0 })],
+		});
+
+		updateCompactWidget(ctx, tracker);
+
+		expect(calls).toHaveLength(0);
+	});
+
+	it("calls setWidget with the compact key and aboveEditor placement when UI is available", () => {
+		const { ctx, calls } = buildContext(true);
+		const tracker = new TaskTracker(() => 1000);
+
+		updateCompactWidget(ctx, tracker);
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0].key).toBe(COMPACT_WIDGET_KEY);
+		expect(calls[0].options).toEqual({ placement: "aboveEditor" });
+	});
+
+	it("factory returns a renderable with render and invalidate methods", () => {
+		const { ctx, calls } = buildContext(true);
+		const tracker = new TaskTracker(() => 1000);
+
+		updateCompactWidget(ctx, tracker);
+
+		const renderable = calls[0].factory({ width: 80 }, noopTheme);
+		expect(typeof renderable.render).toBe("function");
+		expect(typeof renderable.invalidate).toBe("function");
+	});
+
+	it("invalidate() is safe to call and does not throw", () => {
+		const { lines, renderable } = renderWith(new TaskTracker(() => 1000));
+		expect(lines.length).toBeGreaterThan(0);
+		expect(() => renderable.invalidate()).not.toThrow();
+	});
+});
+
+// ── Render states ───────────────────────────────────────────────────────────
+
+describe("updateCompactWidget — render states", () => {
+	it("renders the empty-state message when no tasks exist", () => {
+		const tracker = new TaskTracker(() => 1000);
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+
+		expect(lines.length).toBeGreaterThan(0);
+		expect(lines[0]).toContain("\ue370"); // pencil glyph
+	});
+
+	it("renders the all-done celebration banner when every task is completed", () => {
+		const clock = () => 1000;
+		const tracker = new TaskTracker(clock);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", status: "completed", completedAt: clock() }),
+				makeTask({ id: "t2", status: "completed", completedAt: clock() }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).toContain("\uf527"); // celebration glyph
+		expect(joined).toContain("2/2");
+	});
+
+	it("renders the active task content and elapsed time", () => {
+		const clock = () => 65_000; // 1m 5s after startedAt
+		const tracker = new TaskTracker(clock);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Investigate crash",
+					status: "in_progress",
+					startedAt: 0,
+					priority: "medium",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).toContain("Investigate crash");
+		expect(joined).toContain("1m 5s");
+	});
+
+	it("uses the high-priority badge for high-priority active tasks", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Fix crash",
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).toContain("\uf0e7"); // lightning bolt = high
+		expect(joined).toContain("Fix crash");
+	});
+
+	it("uses the medium-priority badge for medium-priority active tasks", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Run tests",
+					status: "in_progress",
+					startedAt: 0,
+					priority: "medium",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).toContain("\uf444"); // medium badge
+	});
+
+	it("uses the low-priority badge for low-priority active tasks", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Update docs",
+					status: "in_progress",
+					startedAt: 0,
+					priority: "low",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).toContain("\uf4c3"); // low badge
+	});
+
+	it("renders the pending summary when there is no active task but pending tasks exist", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Pending one", status: "pending" }),
+				makeTask({ id: "t2", content: "Done one", status: "completed", completedAt: 5_000 }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).toContain("pending");
+		expect(joined).toContain("done");
+		expect(joined).not.toContain("Pending one"); // no active content shown
+	});
+
+	it("renders the completed/total progress bar with full and light blocks", () => {
+		const clock = () => 1000;
+		const tracker = new TaskTracker(clock);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", status: "completed", completedAt: clock() }),
+				makeTask({ id: "t2", status: "completed", completedAt: clock() }),
+				makeTask({ id: "t3", status: "completed", completedAt: clock() }),
+				makeTask({ id: "t4", status: "pending" }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).toContain("█");
+		expect(joined).toContain("░");
+		expect(joined).toContain("3/4");
+		expect(joined).not.toContain("▓"); // old dark-shade blocks should not be used
+	});
+});
+
+// ── Width truncation ────────────────────────────────────────────────────────
+
+function visibleColumns(text: string): number {
+	const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+	let width = 0;
+	for (const { segment } of seg.segment(text)) {
+		const cp = segment.codePointAt(0) ?? 0;
+		// Approximation matching the oh-my-todo helper:
+		// - 0 / control / zero-width combining marks → 0
+		// - Wide CJK / emoji-like → 2
+		// - otherwise → 1
+		if (
+			cp === 0 ||
+			cp < 32 ||
+			(cp >= 0x7f && cp < 0xa0) ||
+			(cp >= 0x300 && cp <= 0x36f) ||
+			(cp >= 0x1ab0 && cp <= 0x1aff) ||
+			(cp >= 0x1dc0 && cp <= 0x1dff) ||
+			(cp >= 0x20d0 && cp <= 0x20ff) ||
+			(cp >= 0xfe00 && cp <= 0xfe0f)
+		) {
+			continue;
+		}
+		if (
+			cp >= 0x1100 &&
+			(cp <= 0x115f ||
+				cp === 0x2329 ||
+				cp === 0x232a ||
+				(cp >= 0x2e80 && cp <= 0xa4cf) ||
+				(cp >= 0xac00 && cp <= 0xd7a3) ||
+				(cp >= 0xf900 && cp <= 0xfaff) ||
+				(cp >= 0xfe10 && cp <= 0xfe19) ||
+				(cp >= 0xfe30 && cp <= 0xfe6f) ||
+				(cp >= 0xff00 && cp <= 0xff60) ||
+				(cp >= 0xffe0 && cp <= 0xffe6))
+		) {
+			width += 2;
+			continue;
+		}
+		if (
+			cp >= 0x1f000 && cp <= 0x1fbff
+		) {
+			width += 2;
+			continue;
+		}
+		width += 1;
+	}
+	return width;
+}
+
+describe("updateCompactWidget — width truncation", () => {
+	it("truncates an active task line to the supplied ASCII render width", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "x".repeat(200),
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 40 });
+		for (const line of lines) {
+			expect(visibleColumns(line)).toBeLessThanOrEqual(40);
+		}
+	});
+
+	it("truncates a long line using the tui.width fallback when renderWidth is omitted", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "x".repeat(500),
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { tuiWidth: 25 });
+		for (const line of lines) {
+			expect(visibleColumns(line)).toBeLessThanOrEqual(25);
+		}
+	});
+
+	it("truncates wide (CJK) characters by display columns, not grapheme count", () => {
+		// Each "中" is 2 display columns. 20 chars would be 40 columns.
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "中".repeat(40),
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 20 });
+		for (const line of lines) {
+			expect(visibleColumns(line)).toBeLessThanOrEqual(20);
+		}
+	});
+
+	it("truncates emoji-like sequences by display columns", () => {
+		// 🚀 is in the emoji range and renders as 2 columns.
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "🚀".repeat(30),
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 20 });
+		for (const line of lines) {
+			expect(visibleColumns(line)).toBeLessThanOrEqual(20);
+		}
+	});
+
+	it("returns an empty line when renderWidth is 0", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Anything", status: "pending" }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 0 });
+		for (const line of lines) {
+			expect(line).toBe("");
+		}
+	});
+});
+
+// ── Theme application ──────────────────────────────────────────────────────
+
+describe("updateCompactWidget — theme application", () => {
+	it("applies theme fg() to the active task bullet and progress bar colors", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Active task",
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+				}),
+				makeTask({ id: "t2", status: "completed", completedAt: 5_000 }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, {
+			renderWidth: 120,
+			theme: capturingTheme,
+		});
+		const joined = lines.join("\n");
+
+		// Active task bullet is colored with accent; progress bar with success or accent
+		expect(joined).toContain("<accent>");
+		expect(joined).toMatch(/<success>|<accent>/);
+	});
+
+	it("calls theme fg() with the theme instance as this", () => {
+		const tracker = new TaskTracker(() => 1000);
+
+		const { lines } = renderWith(tracker, {
+			renderWidth: 80,
+			theme: statefulTheme,
+		});
+
+		expect(lines[0]).toContain("M\ue370 No tasks");
+	});
+});

@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+
+# Local code-intelligence index
+.codegraph/
+
+# OS / editor
+.DS_Store
+*.log
