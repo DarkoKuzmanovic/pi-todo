@@ -7,3 +7,7 @@ node_modules/
 # OS / editor
 .DS_Store
 *.log
+
+# Local PMTI working memory (decisions, roadmap, milestones, task packets,
+# session logs, .pi/tmp/ reports) — not part of the public extension.
+.pi/
