@@ -43,3 +43,9 @@ A milestone is not done until:
 
 Oracle is pre-code advisory. Reviewer is post-code. Executor fixes blockers. Automated fix-back is bounded to two rounds before human/orchestrator escalation.
 <!-- END PMTI MANAGED BLOCK -->
+
+## Lessons learned
+
+### Keep live compaction verification as a separate close-out gate
+
+For compaction-sensitive Pi extensions, lifecycle tests and mocked UI coverage are necessary but not sufficient. Keep a manual live `/compact` or equivalent reload/trial step as a milestone close-out gate because background workers cannot safely exercise the real Pi session, prompt-injection, status/widget, and slash-command path end to end.

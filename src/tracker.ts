@@ -121,8 +121,11 @@ export class TaskTracker {
 
 // ── Internal helpers ───────────────────────────────────────────────────────
 
-/** Safe extractor for pi-todo's { tasks: Task[] } details shape. */
-function extractTasks(details: unknown): Task[] | null {
+/** Safe extractor for pi-todo's { tasks: Task[] } details shape.
+ *  Extracts `blockedBy` faithfully from stored details WITHOUT validating
+ *  or normalizing dependency references. Replay-time validation lives in
+ *  `./deps.ts` and is invoked only at the `todo_write` input boundary. */
+export function extractTasks(details: unknown): Task[] | null {
 	if (!details || typeof details !== "object") return null;
 	const d = details as Record<string, unknown>;
 	const arr = d.tasks;
@@ -140,6 +143,7 @@ function extractTasks(details: unknown): Task[] | null {
 			createdAt: Number(t.createdAt ?? 0),
 			startedAt: t.startedAt != null ? Number(t.startedAt) : undefined,
 			completedAt: t.completedAt != null ? Number(t.completedAt) : undefined,
+			blockedBy: extractBlockedBy(t.blockedBy),
 		});
 	}
 	return tasks;
@@ -153,4 +157,21 @@ function validStatus(v: unknown): "pending" | "in_progress" | "completed" {
 function validPriority(v: unknown): "high" | "medium" | "low" {
 	if (v === "high" || v === "medium" || v === "low") return v;
 	return "medium";
+}
+
+/**
+ * Extract a `blockedBy` array of strings from an unknown value, filtering
+ * out non-string entries. Returns `undefined` when the cleaned array is
+ * empty. Faithfully preserves any dependency references it finds —
+ * validation/normalization is a `todo_write`-boundary concern in
+ * `./deps.ts`.
+ */
+function extractBlockedBy(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const out: string[] = [];
+	for (const id of value) {
+		if (typeof id !== "string") continue;
+		out.push(id);
+	}
+	return out.length === 0 ? undefined : out;
 }

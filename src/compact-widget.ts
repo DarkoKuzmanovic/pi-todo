@@ -1,4 +1,5 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { isBlocked } from "./deps";
 import type { TaskTracker } from "./tracker";
 import type { TaskPriority } from "./types";
 
@@ -157,6 +158,15 @@ function buildRenderable(
 				left = tf("muted", `\uf4aa ${pending} pending, ${completed} done`);
 			}
 
+			// Blocked count: a small, non-crowding segment.
+			const allTasks = [...tracker.tasks];
+			const blockedCount = allTasks.filter(
+				(t) => t.status === "pending" && isBlocked(t, allTasks),
+			).length;
+			let blockedSeg = "";
+			if (blockedCount > 0) {
+				blockedSeg = tf("muted", `  \u2298 ${blockedCount} blocked`);
+			}
 			let right = "";
 			if (completed > 0 && total > 0) {
 				const barLen = 12;
@@ -167,7 +177,7 @@ function buildRenderable(
 			}
 
 			const gap = left && right ? "  " : "";
-			const content = left + gap + right;
+			const content = left + gap + right + blockedSeg;
 			if (!content) return [];
 
 			return [truncateToColumns(content, width)];

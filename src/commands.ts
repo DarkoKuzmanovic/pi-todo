@@ -8,6 +8,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TodoRuntime } from "./runtime";
+import { isBlocked } from "./deps";
 import { PRIORITY_ORDER } from "./types";
 import type { Task, TaskPriority } from "./types";
 
@@ -21,14 +22,38 @@ function findTask(tracker: TodoRuntime["tracker"], id: string): Task | undefined
 	return tracker.tasks.find((t) => t.id === id);
 }
 
-function highestPriorityPending(tracker: TodoRuntime["tracker"]): Task | undefined {
-	const pending = tracker.tasks.filter((t) => t.status === "pending");
+/** Highest-priority unblocked pending task, or undefined when none are unblocked. */
+function highestPriorityUnblockedPending(tracker: TodoRuntime["tracker"]): Task | undefined {
+	const tasks = [...tracker.tasks];
+	const pending = tasks.filter((t) => t.status === "pending");
 	if (pending.length === 0) return undefined;
-	return pending.toSorted(
+	const unblocked = pending.filter((t) => !isBlocked(t, tasks));
+	if (unblocked.length === 0) return undefined;
+	return unblocked.toSorted(
 		(a, b) => PRIORITY_ORDER[a.priority as TaskPriority] - PRIORITY_ORDER[b.priority as TaskPriority],
 	)[0];
 }
 
+/** True when there is at least one pending task currently blocked by an unfinished dependency. */
+function hasAnyBlockedPending(tracker: TodoRuntime["tracker"]): boolean {
+	const tasks = [...tracker.tasks];
+	return tasks.some((t) => t.status === "pending" && isBlocked(t, tasks));
+}
+
+/** Human-readable dependency context for a blocked task. */
+function blockedByContext(task: Task, tracker: TodoRuntime["tracker"]): string {
+	const deps = task.blockedBy ?? [];
+	if (deps.length === 0) return "no dependencies";
+	const byId = new Map(tracker.tasks.map((t) => [t.id, t]));
+	return deps
+		.map((id) => {
+			const dep = byId.get(id);
+			return dep
+				? `${id} (${dep.status === "completed" ? "done" : "not yet completed"})`
+				: `${id} (not found)`;
+		})
+		.join(", ");
+}
 // ── Registration ───────────────────────────────────────────────────────────
 
 export function registerTodoCommands(pi: ExtensionAPI, runtime: TodoRuntime): void {
@@ -75,23 +100,41 @@ export function registerTodoCommands(pi: ExtensionAPI, runtime: TodoRuntime): vo
 				ctx.ui.notify(`Task "${id}" is already in progress`, "info");
 				return;
 			}
-			sendCommand(pi, `Set task ${id} ("${task.content}") to in_progress using todo_write.`);
+			if (isBlocked(task, [...tracker.tasks])) {
+				ctx.ui.notify(
+					`Task ${id} is blocked by: ${blockedByContext(task, tracker)}. Starting anyway...`,
+					"info",
+				);
+				sendCommand(
+					pi,
+					`Set task ${id} ("${task.content}") to in_progress using todo_write. ` +
+						`Note: this task has incomplete dependencies (${task.blockedBy?.join(", ") ?? ""}).`,
+				);
+			} else {
+				sendCommand(pi, `Set task ${id} ("${task.content}") to in_progress using todo_write.`);
+			}
 			ctx.ui.notify(`Starting "${task.content}"...`, "info");
 		},
 	});
 
 	// ── /next ─────────────────────────────────────────────────────────────
 	pi.registerCommand("next", {
-		description: "Complete the current task and start the next pending one",
+		description: "Complete the current task and start the next unblocked pending one",
 		handler: async (_args, ctx) => {
 			const active = tracker.activeTask;
-			const nextUp = highestPriorityPending(tracker);
+			const nextUp = highestPriorityUnblockedPending(tracker);
 
 			if (!active && !nextUp) {
-				ctx.ui.notify("No tasks to advance", "info");
+				if (hasAnyBlockedPending(tracker)) {
+					ctx.ui.notify(
+						"All pending tasks are blocked — complete their dependencies first.",
+						"info",
+					);
+				} else {
+					ctx.ui.notify("No tasks to advance", "info");
+				}
 				return;
 			}
-
 			let msg = "";
 			if (active) {
 				msg += `Mark task ${active.id} ("${active.content}") as completed`;

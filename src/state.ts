@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { STATUS_ICON } from "./types";
-import type { Task, TaskDetails, TaskPriority, TaskStatus } from "./types";
+import { latestTodoReplaySource } from "./replay";
+import { extractTasks } from "./tracker";
+import type { Task, TaskPriority } from "./types";
 
 // ── TodoStore ──────────────────────────────────────────────────────────────────
 
@@ -96,14 +97,11 @@ export function reconstructState(ctx: ExtensionContext): void {
 		return;
 	}
 
-	for (const entry of branch) {
-		if (entry.type !== "message") continue;
-		const msg = entry.message;
-		if (msg.role !== "toolResult" || (msg.toolName !== "todo_write" && msg.toolName !== "todo_remove")) continue;
-		const details = msg.details as TaskDetails | undefined;
-		store.tasks = Array.isArray(details?.tasks) ? details.tasks : [];
-		store.syncIdCounter();
+	const source = latestTodoReplaySource(branch);
+	if (source) {
+		store.tasks = extractTasks(source.details) ?? [];
 	}
+	store.syncIdCounter();
 }
 
 // ── Status bar ─────────────────────────────────────────────────────────────────

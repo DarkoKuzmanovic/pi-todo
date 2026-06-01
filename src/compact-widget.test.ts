@@ -305,6 +305,54 @@ describe("updateCompactWidget — render states", () => {
 		expect(joined).toContain("3/4");
 		expect(joined).not.toContain("▓"); // old dark-shade blocks should not be used
 	});
+
+	// ── M2-T3: blocked count segment ──────────────────────────────
+
+	it("renders a blocked count segment when tasks are blocked", () => {
+		const tracker = new TaskTracker(() => 1000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Blocker", status: "pending" }),
+				makeTask({ id: "t2", content: "Blocked A", status: "pending", blockedBy: ["t1"] }),
+				makeTask({ id: "t3", content: "Blocked B", status: "pending", blockedBy: ["t1"] }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).toContain("2 blocked");
+	});
+
+	it("omits the blocked count segment when no tasks are blocked", () => {
+		const tracker = new TaskTracker(() => 1000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Solo", status: "pending" }),
+				makeTask({ id: "t2", content: "Other", status: "pending" }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).not.toContain("blocked");
+	});
+
+	it("does not count completed tasks toward the blocked count", () => {
+		const tracker = new TaskTracker(() => 1000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Done", status: "completed", completedAt: 1000 }),
+				makeTask({ id: "t2", content: "Pending with completed dep", status: "pending", blockedBy: ["t1"] }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		expect(joined).not.toContain("blocked");
+	});
 });
 
 // ── Width truncation ────────────────────────────────────────────────────────

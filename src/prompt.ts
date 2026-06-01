@@ -1,4 +1,5 @@
 import { priorityLabel, store } from "./state";
+import { isBlocked } from "./deps";
 import { STATUS_ICON } from "./types";
 import { PRIORITY_ORDER } from "./types";
 
@@ -16,15 +17,28 @@ export function buildSystemPromptBlock(): string {
 	];
 
 	const inProg = active.filter((t) => t.status === "in_progress");
-	const pending = active
-		.filter((t) => t.status === "pending")
+	const allTasks = [...store.tasks];
+	const unblockedPending = active
+		.filter((t) => t.status === "pending" && !isBlocked(t, allTasks))
+		.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+	const blockedPending = active
+		.filter((t) => t.status === "pending" && isBlocked(t, allTasks))
 		.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
 
-	for (const t of [...inProg, ...pending]) {
+	for (const t of [...inProg, ...unblockedPending]) {
 		const icon = t.status === "in_progress" ? STATUS_ICON.in_progress : STATUS_ICON.pending;
 		const pLabel = `[${priorityLabel(t.priority)}]`;
 		const suffix = t.status === "in_progress" ? "  ← in progress" : "";
 		lines.push(`${icon} ${pLabel} ${t.content}${suffix}`);
+	}
+
+	if (blockedPending.length > 0) {
+		lines.push("", "## Blocked (waiting on dependencies):");
+		for (const t of blockedPending) {
+			const pLabel = `[${priorityLabel(t.priority)}]`;
+			const deps = (t.blockedBy ?? []).join(", ");
+			lines.push(`⊘ [Blocked] ${pLabel} ${t.content}  (blocked by: ${deps})`);
+		}
 	}
 
 	const doneCount = store.tasks.length - active.length;
@@ -39,10 +53,20 @@ export function buildSystemPromptBlock(): string {
 
 export function formatListForLLM(): string {
 	if (store.tasks.length === 0) return "Task list is empty.";
+	const allTasks = [...store.tasks];
 	return store.tasks
 		.map((t) => {
-			const icon = t.status === "in_progress" ? STATUS_ICON.in_progress : t.status === "completed" ? STATUS_ICON.completed : STATUS_ICON.pending;
-			return `${icon} [${priorityLabel(t.priority)}] [${t.id}] ${t.content}`;
+			const icon =
+				t.status === "in_progress"
+					? STATUS_ICON.in_progress
+					: t.status === "completed"
+						? STATUS_ICON.completed
+						: STATUS_ICON.pending;
+			const blockedSuffix =
+				t.status !== "completed" && isBlocked(t, allTasks)
+					? `  (blocked by: ${(t.blockedBy ?? []).join(", ")})`
+					: "";
+			return `${icon} [${priorityLabel(t.priority)}] [${t.id}] ${t.content}${blockedSuffix}`;
 		})
 		.join("\n");
 }

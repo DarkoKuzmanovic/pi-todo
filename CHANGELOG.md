@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- Optional `blockedBy?: string[]` dependency metadata on tasks. Tasks may depend on other tasks; blocked state is derived rather than persisted and is reflected in the prompt, `/todos` listing, compact widget, and command semantics.
+- Pure `src/deps.ts` helpers: `dedupeBlockedBy`, `normalizeBlockedBy`, `findCycle` (DFS), `isBlocked`, `validateDependencyGraph`, and `formatStrippedWarning`. `todo_write` validates the graph atomically after ID generation, before `store.setTasks()`. Cycles are rejected without mutating canonical state; self/duplicate IDs are stripped silently; unknown IDs are stripped with a warning appended to the tool result; dependencies on completed tasks are allowed.
+- `/next` now skips blocked pending tasks and reports "All pending tasks are blocked — complete their dependencies first." when no unblocked pending work remains.
+- `/start <id>` warns with the blocked-by context and still sends the audited follow-up message annotated with "incomplete dependencies" so the model can proceed knowingly.
+- Compact widget now shows a `⊘ N blocked` segment when pending tasks are blocked.
+- Prompt injection and `/todos` listing render blocked pending tasks in a separate `Blocked (waiting on dependencies):` section with `(blocked by: t1, t2)` suffix.
+- 26 new `src/deps.test.ts` cases for dependency normalization, cycle detection, and validation.
+- 6 new `src/commands.test.ts` cases for blocked-aware `/start` and `/next` semantics.
+- 3 new `src/compact-widget.test.ts` cases for the blocked count segment.
+- 9 new `src/e2e.test.ts` cases covering M2-T4 end-to-end blockedBy across todo_write, replay, compaction, prompt, /todos, /next, /start, and snapshot carry-forward.
 - Ported `oh-my-todo` polish into `pi-todo`: `TaskTracker`, compact above-editor widget, lifecycle refresh, completion celebrations, and `/done`, `/start`, `/next`, `/pause` slash helpers.
 - Added deterministic Vitest coverage for tracker transitions, compact widget rendering, runtime replay/celebrations, and slash-helper command behavior.
 

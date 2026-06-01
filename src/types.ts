@@ -11,6 +11,8 @@ export interface Task {
 	createdAt: number;
 	startedAt?: number;
 	completedAt?: number;
+	/** IDs of tasks in this list that must be completed before this task can start. */
+	blockedBy?: string[];
 }
 
 export interface TaskDetails {

@@ -235,8 +235,47 @@ describe("/start", () => {
 		expect(msg?.options).toEqual({ deliverAs: "followUp" });
 		expect(taskStates()).toEqual([{ id: "t1", status: "pending" }]);
 	});
-});
 
+	// ── M2-T2: /start warns on blocked but still sends the follow-up ──
+
+	it("warns and adds a note when starting a blocked task", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Blocker", status: "pending" }),
+				makeTask({ id: "t2", content: "Doomed", status: "pending", blockedBy: ["t1"] }),
+			],
+		});
+		const cmd = fakeApi.commands.get("start");
+		const { ctx, notifications } = buildCommandContext();
+		await cmd?.handler("t2", ctx);
+
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0]!;
+		expect(msg.options).toEqual({ deliverAs: "followUp" });
+		expect(msg.content).toContain("t2");
+		expect(msg.content).toContain("Doomed");
+		expect(msg.content).toContain("in_progress");
+		expect(msg.content).toContain("todo_write");
+		expect(msg.content).toContain("incomplete dependencies");
+
+		const blockedNote = notifications.find(
+			(n) => n.type === "info" && n.message.includes("blocked by"),
+		);
+		expect(blockedNote).toBeDefined();
+		expect(blockedNote?.message).toContain("t1");
+	});
+
+	it("does not warn when starting an unblocked task", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [makeTask({ id: "t1", content: "Solo", status: "pending" })],
+		});
+		const cmd = fakeApi.commands.get("start");
+		const { ctx, notifications } = buildCommandContext();
+		await cmd?.handler("t1", ctx);
+		const blockedNote = notifications.find((n) => n.message.includes("blocked by"));
+		expect(blockedNote).toBeUndefined();
+	});
+});
 // ── /next ───────────────────────────────────────────────────────────────────
 
 describe("/next", () => {
@@ -328,6 +367,72 @@ describe("/next", () => {
 		const msg = fakeApi.sentMessages[0];
 		expect(msg?.content).toContain("t2");
 		expect(msg?.content).not.toContain("t1");
+	});
+
+	// ── M2-T2: blocked-state filtering ────────────────────────────────
+
+	it("skips blocked pending tasks and starts the next unblocked one", async () => {
+
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Blocker", status: "pending", priority: "low" }),
+				makeTask({ id: "t2", content: "Blocked work", status: "pending", priority: "high", blockedBy: ["t1"] }),
+				makeTask({ id: "t3", content: "Unblocked work", status: "pending", priority: "medium" }),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("", ctx);
+		const msg = fakeApi.sentMessages[0];
+		expect(msg?.content).toContain("t3");
+		expect(msg?.content).toContain("Unblocked work");
+		expect(msg?.content).not.toContain("t2");
+	});
+
+	it("informs when all pending tasks are blocked", async () => {
+		// Edge case: the only pending task depends on itself. This is the only
+		// way to construct a tracker state where every pending task is blocked
+		// without forming a multi-task cycle (which the validator rejects).
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Self-blocker", status: "pending", blockedBy: ["t1"] }),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx, notifications } = buildCommandContext();
+		await cmd?.handler("", ctx);
+		expect(fakeApi.sentMessages).toHaveLength(0);
+		expect(notifications[0]?.type).toBe("info");
+		expect(notifications[0]?.message).toContain("blocked");
+	});
+
+	it("treats a blocked task as unblocked once its dependency is completed", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Blocker", status: "completed" }),
+				makeTask({ id: "t2", content: "Now unblocked", status: "pending", blockedBy: ["t1"] }),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("", ctx);
+		const msg = fakeApi.sentMessages[0];
+		expect(msg?.content).toContain("t2");
+		expect(msg?.content).toContain("Now unblocked");
+	});
+
+	it("does not block on completed dependencies and still picks the task", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Done dep", status: "completed" }),
+				makeTask({ id: "t2", content: "Pending with completed dep", status: "pending", blockedBy: ["t1"] }),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("", ctx);
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		expect(fakeApi.sentMessages[0]?.content).toContain("t2");
 	});
 });
 

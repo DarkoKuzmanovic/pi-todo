@@ -23,6 +23,13 @@ export const TaskSchema = Type.Object({
 	priority: StringEnum(["high", "medium", "low"] as const, {
 		description: "Task priority.",
 	}),
+	blockedBy: Type.Optional(
+		Type.Array(Type.String(), {
+			description:
+				"IDs of tasks in this list that must be completed before this task can start. " +
+				"Omit or pass an empty array if the task has no dependencies.",
+		}),
+	),
 });
 
 export const TodoWriteParams = Type.Object({

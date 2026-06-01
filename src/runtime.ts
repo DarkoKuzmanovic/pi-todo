@@ -9,42 +9,25 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { updateCompactWidget } from "./compact-widget";
+import { latestTodoReplaySource, TODO_REMOVE, TODO_WRITE } from "./replay";
 import { updateWidget } from "./state";
 import { TaskTracker } from "./tracker";
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-/** Tool names that carry task details and should drive the tracker. */
-const TODO_WRITE = "todo_write";
-const TODO_REMOVE = "todo_remove";
 
 // ── Session helpers ────────────────────────────────────────────────────────
 
 /**
  * Walk a session branch and return the `details` payload of the most recent
- * `todo_write` or `todo_remove` tool result, or `undefined` if none found.
+ * supported pi-todo replay source, or `undefined` if none found.
  *
- * Mirrors the recovery helper used in `../oh-my-todo/src/index.ts` so
- * forked or reloaded sessions reconstruct tracker state from the latest
- * tool result without replaying every tool call.
+ * Uses the shared replay helper from `src/replay.ts` so that compacted,
+ * malformed, empty, and later-tool-result branches are handled the same way
+ * by the runtime tracker and the canonical store.
  */
 export function latestTodoDetails(
 	branch: readonly unknown[],
 ): unknown | undefined {
-	let latest: unknown | undefined;
-	for (const entry of branch) {
-		if (!entry || typeof entry !== "object") continue;
-		const e = entry as {
-			type?: unknown;
-			message?: { role?: unknown; toolName?: unknown; details?: unknown };
-		};
-		if (e.type !== "message") continue;
-		const msg = e.message;
-		if (!msg?.role || msg.role !== "toolResult") continue;
-		if (msg.toolName !== TODO_WRITE && msg.toolName !== TODO_REMOVE) continue;
-		latest = msg.details;
-	}
-	return latest;
+	const source = latestTodoReplaySource(branch);
+	return source?.details;
 }
 
 // ── TodoRuntime ────────────────────────────────────────────────────────────
@@ -76,9 +59,9 @@ export class TodoRuntime {
 	): void {
 		this.resetCelebrations();
 		this.tracker.reconstructFromDetails({ tasks: [] });
-		const details = latestTodoDetails(branch);
-		if (details !== undefined) {
-			this.tracker.reconstructFromDetails(details);
+		const source = latestTodoReplaySource(branch);
+		if (source) {
+			this.tracker.reconstructFromDetails(source.details);
 		}
 		this.refreshWidgets(ctx);
 	}

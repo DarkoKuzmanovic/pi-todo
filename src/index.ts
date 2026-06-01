@@ -26,7 +26,9 @@ import { TodoRemoveParams, TodoWriteParams } from "./schemas";
 import { registerTodoCommands } from "./commands";
 import { TodoRuntime } from "./runtime";
 import { reconstructState, store } from "./state";
-import type { TaskDetails, TaskPriority, TaskStatus } from "./types";
+import { createTodoSnapshot, TODO_SNAPSHOT_CUSTOM_TYPE } from "./replay";
+import { formatStrippedWarning, validateDependencyGraph } from "./deps";
+import type { Task, TaskDetails, TaskPriority, TaskStatus } from "./types";
 
 // ── Runtime ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,24 @@ export default function todoExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
+		reconstructState(ctx);
+		runtime.reconstructFromSession(getBranchSafe(ctx), ctx);
+	});
+
+	// ── Compaction lifecycle ─────────────────────────────────────────────
+	// Persist current task state as a custom entry before Pi writes the
+	// compaction summary. Always include the full task list (even empty) so
+	// a future replay from the compacted branch cannot resurrect stale tasks.
+	// Do NOT return `compaction` — that would replace Pi's default summary.
+	pi.on("session_before_compact", (_event, _ctx) => {
+		pi.appendEntry(TODO_SNAPSHOT_CUSTOM_TYPE, createTodoSnapshot({ tasks: [...store.tasks] }));
+	});
+
+	// After compaction the branch is trimmed. Reconstruct both the canonical
+	// store and the runtime tracker from the kept branch (which now includes
+	// the custom entry appended above), then refresh widgets. Celebrations
+	// are reset inside `reconstructFromSession` so they do not replay.
+	pi.on("session_compact", async (_event, ctx) => {
 		reconstructState(ctx);
 		runtime.reconstructFromSession(getBranchSafe(ctx), ctx);
 	});
@@ -101,21 +121,43 @@ export default function todoExtension(pi: ExtensionAPI): void {
 		parameters: TodoWriteParams,
 
 		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const updated = params.tasks.map((t) => ({
-				id: t.id ?? store.generateId(),
-				content: t.content,
-				status: t.status as TaskStatus,
-				priority: t.priority as TaskPriority,
-			}));
+			// Build candidate task list preserving any blockedBy metadata the agent sent.
+			const candidates: Task[] = params.tasks.map((t) => {
+				const next: Task = {
+					id: t.id ?? store.generateId(),
+					content: t.content,
+					status: t.status as TaskStatus,
+					priority: t.priority as TaskPriority,
+				};
+				if (Array.isArray(t.blockedBy)) {
+					next.blockedBy = [...t.blockedBy];
+				}
+				return next;
+			});
 
-			store.applyStatusTransitions(updated);
-			store.setTasks(updated);
+			// Apply the oracle-specified dependency validation policy:
+			//   - strip self-deps and duplicates silently
+			//   - strip unknown IDs with warning
+			//   - reject cycles atomically
+			const validation = validateDependencyGraph(candidates);
+			if (!validation.ok) {
+				return {
+					content: [{ type: "text", text: validation.error }],
+					details: { tasks: [...store.tasks] } satisfies TaskDetails,
+				};
+			}
+
+			store.applyStatusTransitions(validation.tasks);
+			store.setTasks(validation.tasks);
 			store.syncIdCounter();
 			const details = { tasks: [...store.tasks] } satisfies TaskDetails;
 			runtime.processToolResult("todo_write", details, ctx);
 
+			const warning = formatStrippedWarning(validation.strippedUnknown);
+			const listText = formatListForLLM();
+			const text = warning ? `${listText}\n\n${warning}` : listText;
 			return {
-				content: [{ type: "text", text: formatListForLLM() }],
+				content: [{ type: "text", text }],
 				details,
 			};
 		},
