@@ -8,7 +8,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TodoRuntime } from "./runtime";
-import { isBlocked } from "./deps";
+import { activeBlockerIds, isBlocked } from "./deps";
+import { activeTasks } from "./tombstone";
 import { PRIORITY_ORDER } from "./types";
 import type { Task, TaskPriority } from "./types";
 
@@ -19,12 +20,12 @@ function sendCommand(pi: ExtensionAPI, msg: string): void {
 }
 
 function findTask(tracker: TodoRuntime["tracker"], id: string): Task | undefined {
-	return tracker.tasks.find((t) => t.id === id);
+	return activeTasks([...tracker.tasks]).find((t) => t.id === id);
 }
 
 /** Highest-priority unblocked pending task, or undefined when none are unblocked. */
 function highestPriorityUnblockedPending(tracker: TodoRuntime["tracker"]): Task | undefined {
-	const tasks = [...tracker.tasks];
+	const tasks = activeTasks([...tracker.tasks]);
 	const pending = tasks.filter((t) => t.status === "pending");
 	if (pending.length === 0) return undefined;
 	const unblocked = pending.filter((t) => !isBlocked(t, tasks));
@@ -36,14 +37,14 @@ function highestPriorityUnblockedPending(tracker: TodoRuntime["tracker"]): Task 
 
 /** True when there is at least one pending task currently blocked by an unfinished dependency. */
 function hasAnyBlockedPending(tracker: TodoRuntime["tracker"]): boolean {
-	const tasks = [...tracker.tasks];
+	const tasks = activeTasks([...tracker.tasks]);
 	return tasks.some((t) => t.status === "pending" && isBlocked(t, tasks));
 }
 
 /** Human-readable dependency context for a blocked task. */
 function blockedByContext(task: Task, tracker: TodoRuntime["tracker"]): string {
-	const deps = task.blockedBy ?? [];
-	if (deps.length === 0) return "no dependencies";
+	const deps = activeBlockerIds(task, tracker.tasks);
+	if (deps.length === 0) return "no blocking dependencies";
 	const byId = new Map(tracker.tasks.map((t) => [t.id, t]));
 	return deps
 		.map((id) => {
@@ -100,18 +101,29 @@ export function registerTodoCommands(pi: ExtensionAPI, runtime: TodoRuntime): vo
 				ctx.ui.notify(`Task "${id}" is already in progress`, "info");
 				return;
 			}
-			if (isBlocked(task, [...tracker.tasks])) {
+		if (isBlocked(task, activeTasks([...tracker.tasks]))) {
 				ctx.ui.notify(
 					`Task ${id} is blocked by: ${blockedByContext(task, tracker)}. Starting anyway...`,
 					"info",
 				);
+				// M3 — use `activeBlockerIds` so tombstoned deps are NOT in the
+				// follow-up message (replaces the raw `task.blockedBy` join
+				// which could leak a dead id into the agent's view).
+				// M-f — include the activeForm label if present so the agent
+				// can phrase its acknowledgement with the present-progressive form.
+				const liveActiveDeps = activeBlockerIds(task, activeTasks([...tracker.tasks])).join(", ");
+				const activeFormSuffix = task.activeForm ? ` Currently ${task.activeForm}.` : "";
 				sendCommand(
 					pi,
 					`Set task ${id} ("${task.content}") to in_progress using todo_write. ` +
-						`Note: this task has incomplete dependencies (${task.blockedBy?.join(", ") ?? ""}).`,
+						`Note: this task has incomplete dependencies (${liveActiveDeps || "none"}).${activeFormSuffix}`,
 				);
 			} else {
-				sendCommand(pi, `Set task ${id} ("${task.content}") to in_progress using todo_write.`);
+				const activeFormSuffix = task.activeForm ? ` Currently ${task.activeForm}.` : "";
+				sendCommand(
+					pi,
+					`Set task ${id} ("${task.content}") to in_progress using todo_write.${activeFormSuffix}`,
+				);
 			}
 			ctx.ui.notify(`Starting "${task.content}"...`, "info");
 		},
@@ -138,10 +150,12 @@ export function registerTodoCommands(pi: ExtensionAPI, runtime: TodoRuntime): vo
 			let msg = "";
 			if (active) {
 				msg += `Mark task ${active.id} ("${active.content}") as completed`;
+				if (active.activeForm) msg += ` — Currently ${active.activeForm}`;
 			}
 			if (nextUp) {
 				if (msg) msg += " and ";
 				msg += `set task ${nextUp.id} ("${nextUp.content}") to in_progress`;
+				if (nextUp.activeForm) msg += ` — Currently ${nextUp.activeForm}`;
 			}
 			msg += " using todo_write.";
 			sendCommand(pi, msg);

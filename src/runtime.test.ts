@@ -390,6 +390,36 @@ describe("TodoRuntime.processToolResult", () => {
 		expect(notifications).toHaveLength(0);
 	});
 
+	it("emits all-done celebration after tombstone and remaining live tasks complete", () => {
+		// Regression: a tombstoned non-completed task was keeping total > done forever,
+		// permanently suppressing the all-done celebration after any removal.
+		const { ctx, notifications } = buildContext();
+		// Seed: 2 live tasks
+		runtime.processToolResult("todo_write", {
+			tasks: [
+				makeTask({ id: "t1", content: "A", status: "in_progress" }),
+				makeTask({ id: "t2", content: "B", status: "pending" }),
+			],
+		}, ctx);
+		// Remove t2 (soft-delete)
+		runtime.processToolResult("todo_remove", {
+			tasks: [
+				makeTask({ id: "t1", content: "A", status: "in_progress" }),
+				makeTask({ id: "t2", content: "B", status: "pending", deletedAt: 999 }),
+			],
+		}, ctx);
+		// Complete t1 — now all remaining live tasks done (in_progress→completed fires celebration)
+		notifications.length = 0;
+		runtime.processToolResult("todo_write", {
+			tasks: [
+				makeTask({ id: "t1", content: "A", status: "completed" }),
+				makeTask({ id: "t2", content: "B", status: "pending", deletedAt: 999 }),
+			],
+		}, ctx);
+		const allDone = notifications.find((n) => n.message.includes("All 1 tasks complete"));
+		expect(allDone).toBeDefined();
+	});
+
 	it("handles details with no tasks array gracefully", () => {
 		const { ctx, widgetCalls } = buildContext();
 		expect(() => runtime.processToolResult("todo_write", {}, ctx)).not.toThrow();

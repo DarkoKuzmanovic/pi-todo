@@ -1,12 +1,13 @@
 import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-tui";
+import { activeBlockerIds, isBlocked } from "./deps";
 import { priorityColor, priorityLabel } from "./state";
 import type { Task, TaskDetails } from "./types";
 import { PRIORITY_ORDER, STATUS_ICON } from "./types";
 
 // ── Shared task-line formatter ────────────────────────────────────────────────
 
-export function formatTaskLine(task: Task, theme: Theme): string {
+export function formatTaskLine(task: Task, theme: Theme, blocked = false, allTasks?: readonly Task[]): string {
 	// ── Status icon ──
 	let icon: string;
 	if (task.status === "completed") {
@@ -31,7 +32,24 @@ export function formatTaskLine(task: Task, theme: Theme): string {
 		content = theme.fg("muted", task.content);
 	}
 
-	return `${icon} ${pLabel}  ${content}`;
+	// ── Blocked marker (concise, dependency-aware, tombstone-safe) ──
+	if (blocked && allTasks) {
+		const blockerIds = activeBlockerIds(task, allTasks);
+		if (blockerIds.length > 0) {
+			const marker = theme.fg("dim", `  \u2298 blocked by ${blockerIds.join(", ")}`);
+			return `${icon} ${pLabel}  ${content}${marker}`;
+		}
+	}
+
+	// ── M4 — Rich fields inline (M-c visibility: owner + activeForm inline; description
+	// is rendered as a separate indented line below, see renderTask / renderTaskResult). ──
+	const ownerSuffix = task.owner ? theme.fg("muted", `  @${task.owner}`) : "";
+	const activeSuffix =
+		task.status === "in_progress" && task.activeForm
+			? theme.fg("dim", `  ⮕${task.activeForm}`)
+			: "";
+
+	return `${icon} ${pLabel}  ${content}${ownerSuffix}${activeSuffix}`;
 }
 
 // ── /todos interactive viewer ──────────────────────────────────────────────────
@@ -116,9 +134,10 @@ export class TodoViewComponent {
 		if (this.tasks.length === 0) {
 			lines.push(truncateToWidth(`  ${th.fg("dim", "No tasks yet. Ask the agent to plan the work.")}`, width));
 		} else {
+			const live = this.tasks.filter((t) => t.deletedAt == null);
 			// ── Progress bar ──
-			const completedCount = this.tasks.filter((t) => t.status === "completed").length;
-			const total = this.tasks.length;
+			const completedCount = live.filter((t) => t.status === "completed").length;
+			const total = live.length;
 			const barWidth = Math.min(20, width - 22);
 			const filled = total > 0 ? Math.round((completedCount / total) * barWidth) : 0;
 			const empty = barWidth - filled;
@@ -133,11 +152,11 @@ export class TodoViewComponent {
 			lines.push("");
 
 			// ── Build sections ──
-			const inProgress = this.tasks.filter((t) => t.status === "in_progress");
-			const pending = this.tasks
+			const inProgress = live.filter((t) => t.status === "in_progress");
+			const pending = live
 				.filter((t) => t.status === "pending")
 				.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
-			const done = this.tasks.filter((t) => t.status === "completed");
+			const done = live.filter((t) => t.status === "completed");
 
 			let flatIdx = 0;
 
@@ -202,18 +221,32 @@ export class TodoViewComponent {
 		// ── ID hint ──
 		const idHint = th.fg("dim", ` [${task.id}]`);
 
-		// ── Format line via shared formatter ──
-		const line = formatTaskLine(task, this.theme);
+		// ── Format line via shared formatter (blocked-aware) ──
+		const line = formatTaskLine(task, this.theme, isBlocked(task, this.tasks), this.tasks);
 
-		return [truncateToWidth(`  ${cursor} ${line}${idHint}`, width)];
+		const out: string[] = [truncateToWidth(`  ${cursor} ${line}${idHint}`, width)];
+
+		// M4 — M-c: description surfaces in /todos as an indented reference
+		// line beneath the task. metadata stays hidden.
+		if (task.description) {
+			out.push(
+				truncateToWidth(
+					`    ${th.fg("dim", `📝 ${task.description}`)}`,
+					width,
+				),
+			);
+		}
+
+		return out;
 	}
 
 	private rebuildFlatTasks(): void {
-		const inProgress = this.tasks.filter((t) => t.status === "in_progress");
-		const pending = this.tasks
+		const live = this.tasks.filter((t) => t.deletedAt == null);
+		const inProgress = live.filter((t) => t.status === "in_progress");
+		const pending = live
 			.filter((t) => t.status === "pending")
 			.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
-		const done = this.showCompleted ? this.tasks.filter((t) => t.status === "completed") : [];
+		const done = this.showCompleted ? live.filter((t) => t.status === "completed") : [];
 
 		this.flatTasks = [...inProgress, ...pending, ...done];
 	}
@@ -230,7 +263,7 @@ export class TodoViewComponent {
 			return new Text(theme.fg("dim", "Task list cleared"), 0, 0);
 		}
 
-		const list = details.tasks;
+		const list = details.tasks.filter((t) => (t as Task).deletedAt == null);
 		const doneCount = list.filter((t) => t.status === "completed").length;
 		const inProgCount = list.filter((t) => t.status === "in_progress").length;
 		const total = list.length;
@@ -241,11 +274,16 @@ export class TodoViewComponent {
 		parts.push(theme.fg("success", `${STATUS_ICON.completed} ${doneCount}/${total} done`));
 		let output = parts.join("  ");
 
-		// ── Task lines via shared formatter ──
+		// ── Task lines via shared formatter (M4: passes allTasks for blocked marker) ──
 		const display = expanded ? list : list.slice(0, 5);
 		for (const t of display) {
-			const line = formatTaskLine(t, theme);
+			const line = formatTaskLine(t, theme, isBlocked(t, list), list);
 			output += `\n${line} ${theme.fg("dim", `[${t.id}]`)}`;
+			// M4 — M-c: description surfaces in renderTaskResult as an
+			// indented reference line. metadata stays hidden.
+			if (t.description) {
+				output += `\n    ${theme.fg("dim", `📝 ${t.description}`)}`;
+			}
 		}
 
 		if (!expanded && list.length > 5) {

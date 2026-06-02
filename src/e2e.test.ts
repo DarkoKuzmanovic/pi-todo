@@ -16,10 +16,13 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import todoExtension from "./index";
+import todoExtension, { runtime } from "./index";
+import { isBlocked } from "./deps";
 import { createTodoSnapshot, TODO_SNAPSHOT_CUSTOM_TYPE } from "./replay";
 import { COMPACT_WIDGET_KEY } from "./compact-widget";
 import { store as todoStore } from "./state";
+import { buildSystemPromptBlock } from "./prompt";
+import { TodoViewComponent } from "./component";
 import type { Task } from "./types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -240,6 +243,24 @@ async function callTodoWrite(
 	};
 	return result;
 }
+
+/**
+ * Invoke the registered `todo_remove` tool's execute handler through the mock.
+ */
+async function callTodoRemove(
+	mockPi: MockPi,
+	params: { ids: string[] },
+	ctx: ExtensionContext,
+): Promise<{ content: { type: string; text: string }[]; details?: { tasks?: unknown[] } }> {
+	const tool = mockPi.tools.get("todo_remove");
+	if (!tool) throw new Error("todo_remove tool not registered");
+	const result = (await tool.execute("call-1", params, undefined, undefined, ctx)) as {
+		content: { type: string; text: string }[];
+		details?: { tasks?: unknown[] };
+	};
+	return result;
+}
+
 // ── Test suite ─────────────────────────────────────────────────────────────
 
 describe("M1-T4 end-to-end: post-compaction reconstructed state", () => {
@@ -766,6 +787,33 @@ describe("M2-T4 end-to-end: blockedBy across todo_write, replay, compaction, pro
 		expect(todoStore.tasks[0]?.id).toBe("sentinel");
 	});
 
+	it("cycle rejection does not advance the store idCounter (atomic)", async () => {
+		todoExtension(mockPi.pi);
+		const ctx = buildCtx(snapshotBranch([]), false).ctx;
+		// Reset counter; a rejected payload must not leak generated IDs.
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+
+		const result = await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					// id-less task → would call store.generateId() and bump the counter.
+					{ content: "Fresh", status: "pending", priority: "medium" },
+					{ id: "a", content: "A", status: "pending", priority: "medium", blockedBy: ["b"] },
+					{ id: "b", content: "B", status: "pending", priority: "medium", blockedBy: ["a"] },
+				],
+			},
+			ctx,
+		);
+
+		const text = result.content[0]?.text ?? "";
+		expect(text.toLowerCase()).toContain("cycle");
+		// Canonical store unchanged AND counter not advanced.
+		expect(todoStore.tasks).toHaveLength(0);
+		expect(todoStore.idCounter).toBe(0);
+	});
+
 	it("/next picks unblocked pending task and skips blocked ones after reconstruction", async () => {
 		todoExtension(mockPi.pi);
 		const branch = snapshotBranch([
@@ -938,5 +986,732 @@ describe("M2-T4 end-to-end: blockedBy across todo_write, replay, compaction, pro
 		const payload = appended?.data as { details: { tasks: { id: string; blockedBy?: string[] }[] } };
 		const t2 = payload.details.tasks.find((t) => t.id === "t2");
 		expect(t2?.blockedBy).toEqual(["t1"]);
+	});
+});
+// ── M3-T1: todo_write tombstone preservation (B1) ────────────────────────────
+
+describe("M3-T1: todo_write tombstone preservation (B1)", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		mockPi = buildMockPi();
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		todoExtension(mockPi.pi);
+	});
+
+	it("B1: todo_write after remove retains tombstone in canonical state AND details", async () => {
+		// Seed a task, then soft-delete it via removeByIds.
+		const ctx = buildCtx(snapshotBranch([]), false).ctx;
+		await callTodoWrite(mockPi, {
+			tasks: [{ id: "t1", content: "Will be removed", status: "pending", priority: "medium" }],
+		}, ctx);
+		expect(todoStore.tasks).toHaveLength(1);
+
+		// Soft-delete t1.
+		todoStore.removeByIds(["t1"]);
+		expect(todoStore.tasks).toHaveLength(1);
+		expect(todoStore.tasks[0]?.deletedAt).toBeGreaterThan(0);
+
+		// Now write a new task without re-sending t1.
+		const result2 = await callTodoWrite(mockPi, {
+			tasks: [{ id: "t2", content: "New task only", status: "pending", priority: "medium" }],
+		}, ctx);
+
+		// Canonical state must still contain t1 (tombstoned).
+		expect(todoStore.tasks).toHaveLength(2);
+		const t1 = todoStore.tasks.find((t) => t.id === "t1");
+		expect(t1).toBeDefined();
+		expect(t1?.deletedAt).toBeGreaterThan(0);
+
+		// Result details must also include the preserved tombstone.
+		const resultTasks = (result2.details?.tasks ?? []) as Task[];
+		expect(resultTasks).toHaveLength(2);
+		const t1Detail = resultTasks.find((t) => t.id === "t1");
+		expect(t1Detail?.deletedAt).toBeGreaterThan(0);
+	});
+
+	it("resurrection: re-sending a tombstoned id becomes live with deletedAt cleared", async () => {
+		const ctx = buildCtx(snapshotBranch([]), false).ctx;
+		await callTodoWrite(mockPi, {
+			tasks: [{ id: "t1", content: "Will be removed", status: "pending", priority: "medium" }],
+		}, ctx);
+		todoStore.removeByIds(["t1"]);
+
+		// Re-send t1 as a live task.
+		const result = await callTodoWrite(mockPi, {
+			tasks: [{ id: "t1", content: "Resurrected", status: "pending", priority: "high" }],
+		}, ctx);
+
+		const t1 = todoStore.tasks.find((t) => t.id === "t1");
+		expect(t1).toBeDefined();
+		expect(t1?.deletedAt).toBeUndefined();
+		expect(t1?.content).toBe("Resurrected");
+		expect(t1?.priority).toBe("high");
+
+		const resultTasks = (result.details?.tasks ?? []) as Task[];
+		const t1Detail = resultTasks.find((t) => t.id === "t1");
+		expect(t1Detail?.deletedAt).toBeUndefined();
+	});
+
+	it("strip-with-warning: live task depending on a tombstoned not-resent id is stripped", async () => {
+		const ctx = buildCtx(snapshotBranch([]), false).ctx;
+		// Seed t1 and t2 with a dependency.
+		await callTodoWrite(mockPi, {
+			tasks: [
+				{ id: "t1", content: "Blocker", status: "pending", priority: "medium" },
+				{ id: "t2", content: "Depends on t1", status: "pending", priority: "medium", blockedBy: ["t1"] },
+			],
+		}, ctx);
+		// Soft-delete t1.
+		todoStore.removeByIds(["t1"]);
+
+		// Re-write: only t2 in candidates (t1 tombstoned, not resent).
+		const result = await callTodoWrite(mockPi, {
+			tasks: [{ id: "t2", content: "Depends on t1", status: "pending", priority: "medium", blockedBy: ["t1"] }],
+		}, ctx);
+
+		const text = result.content[0]?.text ?? "";
+		// The unknown-id warning should be emitted.
+		expect(text).toContain("blockedBy references removed");
+		expect(text).toContain("t1");
+
+		// t2's blockedBy should be stripped.
+		const t2 = todoStore.tasks.find((t) => t.id === "t2");
+		expect(t2?.blockedBy).toBeUndefined();
+	});
+});
+
+// ── M3-T1: idempotent remove ─────────────────────────────────────────────────
+
+describe("M3-T1: idempotent remove", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		mockPi = buildMockPi();
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		todoExtension(mockPi.pi);
+	});
+
+	it("re-removing a tombstoned id is a no-op and not counted in removed N", async () => {
+		const ctx = buildCtx(snapshotBranch([]), false).ctx;
+		await callTodoWrite(mockPi, {
+			tasks: [
+				{ id: "t1", content: "First", status: "pending", priority: "medium" },
+				{ id: "t2", content: "Second", status: "pending", priority: "medium" },
+			],
+		}, ctx);
+
+		// First remove: soft-deletes t1.
+		const removed1 = todoStore.removeByIds(["t1"]);
+		expect(removed1).toEqual(["t1"]);
+
+		// Second remove of same id: no-op.
+		const removed2 = todoStore.removeByIds(["t1"]);
+		expect(removed2).toEqual([]);
+
+		// Canonical state still has both.
+		expect(todoStore.tasks).toHaveLength(2);
+	});
+});
+
+
+// ── M3-T4: Tombstone e2e lifecycle ──────────────────────────────────
+
+describe("M3-T4: tombstone e2e lifecycle — hidden everywhere, retained in history, survives compaction", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		mockPi = buildMockPi();
+	});
+
+	it("tombstone is hidden from all surfaces, retained in store + snapshot, and survives compaction", async () => {
+		// ── Seed tasks ─────────────────────────────────────────────────
+		await todoExtension(mockPi.pi);
+		const { ctx: ctxSeed } = buildCtx([], false);
+		await callTodoWrite(mockPi, {
+			tasks: [
+				{ id: "t1", content: "Keep me", status: "pending", priority: "medium" },
+				{ id: "t2", content: "Remove me", status: "pending", priority: "low" },
+			],
+		}, ctxSeed);
+
+		// ── Soft-delete t2 ────────────────────────────────────────────
+		const removedIds = todoStore.removeByIds(["t2"]);
+		expect(removedIds).toEqual(["t2"]);
+
+		// ── (a) HIDDEN: buildSystemPromptBlock ────────────────────────
+		const { ctx: ctxBefore } = buildCtx([], false);
+		const beforeHandler = mockPi.handlers.get("before_agent_start");
+		expect(beforeHandler).toBeDefined();
+		const result = (await beforeHandler!({}, ctxBefore)) as { systemPrompt?: string } | undefined;
+		const prompt = result?.systemPrompt ?? "";
+		expect(prompt).toContain("Keep me");
+		expect(prompt).not.toContain("Remove me"); // tombstone hidden
+
+		// ── (a) HIDDEN: /todos LLM-text ──────────────────────────────
+		const { ctx: ctxTodos, notifications: todosNots } = buildCtx([], false);
+		const todosCmd = mockPi.commands.get("todos");
+		expect(todosCmd).toBeDefined();
+		await todosCmd!("", ctxTodos);
+		const todosMsg = todosNots[0]?.message ?? "";
+		expect(todosMsg).toContain("Keep me");
+		expect(todosMsg).not.toContain("Remove me"); // tombstone hidden
+
+		// ── (a) HIDDEN: /todos UI (TodoViewComponent) ────────────────
+		const { ctx: ctxUI, customCalls } = buildCtx([], true);
+		const todosCmdUI = mockPi.commands.get("todos");
+		expect(todosCmdUI).toBeDefined();
+		await todosCmdUI!("", ctxUI);
+		// At least one custom component call — TodoViewComponent receives live tasks only
+		expect(customCalls.length).toBeGreaterThan(0);
+
+		// ── (a) HIDDEN: compact widget (covered by tracker-based widget rendering)
+		// After session_compact reconstruction, the tracker has live tasks only
+		// for widget counts; the compact widget is verified in compaction.test.ts.
+		// Here we verify the tracker's live-only view after reconstruction:
+		mockPi.handlers.clear();
+		await todoExtension(mockPi.pi);
+		const branchForWidget = snapshotBranch(todoStore.tasks);
+		const { ctx: ctxWidget } = buildCtx(branchForWidget, false);
+		const compactHandler = mockPi.handlers.get("session_compact");
+		expect(compactHandler).toBeDefined();
+		await compactHandler!({} as unknown, ctxWidget);
+		// Tracker sees only live tasks (activeTasks filters out tombstoned)
+		const trackerLive = [...runtime.tracker.tasks].filter((t) => t.deletedAt == null);
+		expect(trackerLive.length).toBe(1);
+		// ── (a) HIDDEN: /next skips tombstone ────────────────────────
+		const { ctx: ctxNext } = buildCtx([], false);
+		const nextCmd = mockPi.commands.get("next");
+		expect(nextCmd).toBeDefined();
+		await nextCmd!("", ctxNext);
+		// /next sends the todo_write instruction via sendCommand → sentMessages
+		const nextSent = mockPi.sentMessages[mockPi.sentMessages.length - 1];
+		expect(nextSent).toBeDefined();
+		expect(nextSent!.content).toContain("Keep me");
+		expect(nextSent!.content).not.toContain("Remove me");
+
+		// ── (a) HIDDEN: /start t2 → no match ────────────────────────
+		const { ctx: ctxStart, notifications: startNots } = buildCtx([], false);
+		const startCmd = mockPi.commands.get("start");
+		expect(startCmd).toBeDefined();
+		await startCmd!("t2", ctxStart);
+		const startMsg = startNots[0]?.message ?? "";
+		expect(startMsg).not.toContain("Remove me");
+
+		// ── (a) HIDDEN: /done t2 → no match ─────────────────────────
+		const { ctx: ctxDone, notifications: doneNots } = buildCtx([], false);
+		const doneCmd = mockPi.commands.get("done");
+		expect(doneCmd).toBeDefined();
+		await doneCmd!("t2", ctxDone);
+		const doneMsg = doneNots[0]?.message ?? "";
+		expect(doneMsg).not.toContain("Remove me");
+
+		// ── (a) HIDDEN: /pause t2 → no match ────────────────────────
+		const { ctx: ctxPause, notifications: pauseNots } = buildCtx([], false);
+		const pauseCmd = mockPi.commands.get("pause");
+		expect(pauseCmd).toBeDefined();
+		await pauseCmd!("", ctxPause);
+		const pauseMsg = pauseNots[0]?.message ?? "";
+		// /pause uses activeTask; with no in_progress task it reports nothing to pause
+		expect(pauseMsg).toContain("No active task");
+
+		// ── (b) RETAINED in store ────────────────────────────────────
+		expect(todoStore.tasks.length).toBe(2); // both tasks still present
+		const t2 = todoStore.tasks.find((t) => t.id === "t2");
+		expect(t2).toBeDefined();
+		expect(t2!.deletedAt).toBeGreaterThan(0); // tombstone marker present
+		expect(t2!.content).toBe("Remove me");
+
+		// ── (b) RETAINED in pi-todo:snapshot ──────────────────────────
+		mockPi.handlers.clear();
+		// ── (b) RETAINED in pi-todo:snapshot ──────────────────────────
+		mockPi.handlers.clear();
+		await todoExtension(mockPi.pi);
+		const beforeCompHandler = mockPi.handlers.get("session_before_compact");
+		expect(beforeCompHandler).toBeDefined();
+		const { ctx: ctxBeforeComp } = buildCtx([], false);
+		await beforeCompHandler!({}, ctxBeforeComp);
+		const entries = mockPi.appendedEntries;
+		const snapshotEntry = entries.find((e: { customType: string }) => e.customType === TODO_SNAPSHOT_CUSTOM_TYPE);
+		expect(snapshotEntry).toBeDefined();
+		const snapData = (snapshotEntry as { data: { details: { tasks: Task[] } } }).data;
+		expect(snapData.details.tasks.length).toBe(2);
+		const snapT2 = snapData.details.tasks.find((t: Task) => t.id === "t2");
+		expect(snapT2).toBeDefined();
+		expect(snapT2!.deletedAt).toBeGreaterThan(0); // tombstone in snapshot
+
+		// ── (c) SURVIVES compaction ───────────────────────────────────
+		// Use the snapshot data captured from session_before_compact above
+		const compactBranch = [
+			{
+				type: "custom",
+				customType: TODO_SNAPSHOT_CUSTOM_TYPE,
+				data: (snapshotEntry as { data: unknown }).data,
+			},
+		];
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		mockPi.handlers.clear();
+		await todoExtension(mockPi.pi);
+		const { ctx: ctxPostComp } = buildCtx(compactBranch, false);
+		const postCompHandler = mockPi.handlers.get("session_compact");
+		expect(postCompHandler).toBeDefined();
+		await postCompHandler!({} as unknown, ctxPostComp);
+
+		// After compaction, tombstone is in both store and tracker
+		expect(todoStore.tasks.length).toBe(2);
+		const postT2 = todoStore.tasks.find((t) => t.id === "t2");
+		expect(postT2).toBeDefined();
+		expect(postT2!.deletedAt).toBeGreaterThan(0);
+
+		const trackerTasks = [...runtime.tracker.tasks];
+		expect(trackerTasks.length).toBe(2);
+		const trackerT2 = trackerTasks.find((t) => t.id === "t2");
+		expect(trackerT2).toBeDefined();
+		expect(trackerT2!.deletedAt).toBeGreaterThan(0);
+
+		// Store and tracker agree on tombstoned set
+		const storeTombstoned = todoStore.tasks.filter((t) => t.deletedAt != null).map((t) => t.id);
+		const trackerTombstoned = trackerTasks.filter((t) => t.deletedAt != null).map((t) => t.id);
+		expect(storeTombstoned).toEqual(trackerTombstoned);
+		expect(storeTombstoned).toEqual(["t2"]);
+
+		// After compaction, tombstone is STILL hidden from prompt
+		const { ctx: ctxAfterComp } = buildCtx([], false);
+		const afterBeforeHandler = mockPi.handlers.get("before_agent_start");
+		expect(afterBeforeHandler).toBeDefined();
+		const afterResult = (await afterBeforeHandler!({}, ctxAfterComp)) as { systemPrompt?: string } | undefined;
+		const promptAfter = afterResult?.systemPrompt ?? "";
+		expect(promptAfter).toContain("Keep me");
+		expect(promptAfter).not.toContain("Remove me");
+	});
+});
+
+
+// ── M3-T4: blockedBy × tombstone e2e ──────────────────────────────
+
+describe("M3-T4: blockedBy × tombstone e2e", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		mockPi = buildMockPi();
+	});
+
+	it("a live task blocked by a live and a tombstoned dep: blocked by live dep only, no dead id printed, unblocks when live dep completes", async () => {
+		await todoExtension(mockPi.pi);
+
+		// Seed: t1=live blocker, t2=will be tombstoned, t3=depends on both
+		const { ctx: ctxSeed } = buildCtx([], false);
+		await callTodoWrite(mockPi, {
+			tasks: [
+				{ id: "t1", content: "Live blocker", status: "pending", priority: "medium" },
+				{ id: "t2", content: "Dead blocker", status: "pending", priority: "low" },
+				{
+					id: "t3",
+					content: "Blocked task",
+					status: "pending",
+					priority: "high",
+					blockedBy: ["t1", "t2"],
+				},
+			],
+		}, ctxSeed);
+
+		// Soft-delete t2
+		todoStore.removeByIds(["t2"]);
+
+		// ── t3 is still blocked (by live t1) ─────────────────────────
+		const allLive = todoStore.tasks.filter((t) => t.deletedAt == null);
+		const t3 = allLive.find((t) => t.id === "t3");
+		expect(t3).toBeDefined();
+		expect(isBlocked(t3!, allLive)).toBe(true);
+
+		// ── Prompt: t3 shows in blocked section, t1 listed, t2 NOT ───
+		mockPi.handlers.clear();
+		await todoExtension(mockPi.pi);
+		const { ctx: ctxBefore } = buildCtx([], false);
+		const beforeHandler = mockPi.handlers.get("before_agent_start");
+		expect(beforeHandler).toBeDefined();
+		const beforeResult = (await beforeHandler!({}, ctxBefore)) as { systemPrompt?: string } | undefined;
+		const prompt = beforeResult?.systemPrompt ?? "";
+		expect(prompt).toContain("Blocked task"); // t3 in blocked section
+		expect(prompt).not.toContain("Dead blocker"); // t2 hidden
+		expect(prompt).toContain("Live blocker"); // t1 is still live
+		// The blocked-by label must NOT contain t2
+		const blockedLine = prompt.split("\n").find((l) => l.includes("Blocked task"));
+		expect(blockedLine).toBeDefined();
+		expect(blockedLine!).toContain("t1");
+		expect(blockedLine!).not.toContain("t2");
+
+		// ── /todos: t3 shows blocked, only t1 in deps ────────────────
+		const { ctx: ctxTodos, notifications: todosNots } = buildCtx([], false);
+		const todosCmd = mockPi.commands.get("todos");
+		expect(todosCmd).toBeDefined();
+		await todosCmd!("", ctxTodos);
+		const todosMsg = todosNots[0]?.message ?? "";
+		expect(todosMsg).toContain("Blocked task");
+		expect(todosMsg).not.toContain("Dead blocker");
+		expect(todosMsg).toContain("Live blocker");
+		const todosBlockedLine = todosMsg.split("\n").find((l) => l.includes("Blocked task"));
+		expect(todosBlockedLine!).toContain("t1");
+		expect(todosBlockedLine!).not.toContain("t2");
+
+		// ── Complete t1 → t3 becomes unblocked ────────────────────────
+		const { ctx: ctxComplete } = buildCtx([], false);
+		await callTodoWrite(mockPi, {
+			tasks: [
+				{ id: "t1", content: "Live blocker", status: "completed", priority: "medium" },
+				{
+					id: "t3",
+					content: "Blocked task",
+					status: "pending",
+					priority: "high",
+					blockedBy: ["t1", "t2"],
+				},
+			],
+		}, ctxComplete);
+
+		const allLive2 = todoStore.tasks.filter((t) => t.deletedAt == null);
+		const t3unblocked = allLive2.find((t) => t.id === "t3");
+		expect(t3unblocked).toBeDefined();
+		// After completing the live blocker t1, t3 is unblocked
+		// (t2 is tombstoned and ignored, t1 is completed)
+		expect(isBlocked(t3unblocked!, allLive2)).toBe(false);
+	});
+});
+
+
+// ── M4-T4 e2e: rich fields across todo_write, replay, compaction, prompt, view ───
+
+describe("M4-T4 e2e: rich fields across todo_write, replay, compaction, prompt, view", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		mockPi = buildMockPi();
+		todoExtension(mockPi.pi);
+	});
+
+	const testTheme: Theme = {
+		fg: (_color: string, text: string) => text,
+		bold: (text: string) => text,
+		strikethrough: (text: string) => text,
+	} as Theme;
+
+	it("todo_write with rich fields lands in store with correct fields and metadata types (B1)", async () => {
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		await callTodoWrite(mockPi, {
+			tasks: [
+				{
+					id: "t1",
+					content: "Write tests",
+					status: "pending",
+					priority: "high",
+					description: "Add e2e coverage for rich fields",
+					owner: "agent-1",
+					activeForm: "writing tests",
+					metadata: { n: 42, b: true, s: "x" },
+				},
+			],
+		}, ctx);
+
+		const task = todoStore.tasks[0];
+		expect(task.description).toBe("Add e2e coverage for rich fields");
+		expect(task.owner).toBe("agent-1");
+		expect(task.activeForm).toBe("writing tests");
+		expect(task.metadata).toBeDefined();
+		expect(typeof task.metadata!.n).toBe("number");
+		expect(task.metadata!.n).toBe(42);
+		expect(typeof task.metadata!.b).toBe("boolean");
+		expect(task.metadata!.b).toBe(true);
+		expect(typeof task.metadata!.s).toBe("string");
+		expect(task.metadata!.s).toBe("x");
+	});
+
+	it("rich fields survive session_compact and reconstruction in TodoRuntime + prompt block", async () => {
+		const tasks = [
+			{
+				id: "t1",
+				content: "Setup",
+				status: "pending",
+				priority: "medium",
+				description: "Infrastructure",
+				owner: "setup-agent",
+				activeForm: "setting up",
+				metadata: { phase: 1 },
+			},
+		];
+		// First, write rich fields
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		await callTodoWrite(mockPi, { tasks }, ctx);
+
+		// Simulate session_compact with snapshot
+		await triggerSessionCompact(mockPi, snapshotBranch(tasks));
+
+		// After compaction, store should retain rich fields
+		expect(todoStore.tasks[0].description).toBe("Infrastructure");
+		expect(todoStore.tasks[0].owner).toBe("setup-agent");
+		expect(todoStore.tasks[0].activeForm).toBe("setting up");
+		expect(todoStore.tasks[0].metadata).toEqual({ phase: 1 });
+	});
+
+	it("after full reconstruction: TodoViewComponent shows description/owner/activeForm but NOT metadata; prompt uses activeForm label", async () => {
+		const tasks = [
+			{
+				id: "t1",
+				content: "Task A",
+				status: "in_progress",
+				priority: "high",
+				description: "A long description",
+				owner: "agent-1",
+				activeForm: "crafting code",
+				metadata: { secret: "hidden" },
+			},
+		];
+
+		// Seed via todo_write with rich fields
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		const branch = snapshotBranch(tasks);
+		buildCtx(branch, false);
+
+		// Register extension and invoke via replay
+		todoExtension(mockPi.pi);
+
+		// Use triggerSessionCompact to simulate compaction replay
+		await triggerSessionCompact(mockPi, branch);
+
+		// Now check surfaces
+		// TodoViewComponent shows description
+		const view = new TodoViewComponent(todoStore.tasks, testTheme, () => {});
+		const rendered = view.render(120).join("\n");
+		expect(rendered).toContain("A long description");
+		expect(rendered).toContain("crafting code");
+
+		// buildSystemPromptBlock uses activeForm as the active-task label
+		const promptText = buildSystemPromptBlock();
+		expect(promptText).toContain("crafting code");
+		expect(promptText).not.toContain("A long description");
+		expect(promptText).not.toContain("hidden");
+		expect(promptText).not.toContain("secret");
+	});
+});
+
+describe("M4 I2 resurrection: rich fields from new payload are authoritative", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		mockPi = buildMockPi();
+		todoExtension(mockPi.pi);
+	});
+
+	it("I2: re-sending a tombstoned id via todo_write makes the new rich fields authoritative (no merge-back)", async () => {
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+
+		// Seed: todo_write with rich fields
+		await callTodoWrite(mockPi, {
+			tasks: [{
+				id: "t1",
+				content: "Will be removed",
+				status: "pending",
+				priority: "medium",
+				description: "old description",
+				owner: "agent-1",
+				activeForm: "doing X",
+				metadata: { k: "v1", oldKey: true },
+			}],
+		}, ctx);
+
+		// Confirm baseline
+		expect(todoStore.tasks[0].description).toBe("old description");
+		expect(todoStore.tasks[0].owner).toBe("agent-1");
+
+		// todo_remove the task (tombstone it)
+		const removeResult = await callTodoRemove(mockPi, { ids: ["t1"] }, ctx);
+		expect(removeResult.content.some((c) => c.text.includes("Removed"))).toBe(true);
+		// Task is now tombstoned
+		expect(todoStore.tasks[0].deletedAt).not.toBeUndefined();
+		// Rich fields still present in store (per I2 — audit retention)
+		expect(todoStore.tasks[0].description).toBe("old description");
+
+		// todo_write again with same id, DIFFERENT rich fields (resurrection)
+		await callTodoWrite(mockPi, {
+			tasks: [{
+				id: "t1",
+				content: "Resurrected",
+				status: "in_progress",
+				priority: "high",
+				description: "new description",
+				owner: "agent-2",
+				activeForm: "doing Y",
+				metadata: { k: "v2" },
+			}],
+		}, ctx);
+
+		// After resurrection: live, deletedAt cleared, rich fields = new payload
+		const resurrected = todoStore.tasks.find((t: Task) => t.id === "t1");
+		expect(resurrected).toBeDefined();
+		expect(resurrected!.deletedAt).toBeUndefined();
+
+		// I2 invariant: new payload rich fields are authoritative, no merge-back
+		expect(resurrected!.description).toBe("new description");
+		expect(resurrected!.owner).toBe("agent-2");
+		expect(resurrected!.activeForm).toBe("doing Y");
+		expect(resurrected!.metadata).toEqual({ k: "v2" });
+
+		// Explicit negative assertions: no merge-back from pre-tombstone payload
+		expect(resurrected!.description).not.toBe("old description");
+		expect(resurrected!.owner).not.toBe("agent-1");
+		expect(resurrected!.activeForm).not.toBe("doing X");
+		expect(resurrected!.metadata).not.toHaveProperty("oldKey");
+	});
+});
+
+
+// ── M4 I1 fix-back: malformed metadata container is whole-task rejected ──────
+
+describe("M4 I1 fix-back: malformed metadata container is whole-task rejected", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		mockPi = buildMockPi();
+		todoExtension(mockPi.pi);
+	});
+
+	it("todo_write with metadata: 'not-an-object' is atomic-rejected (no ID minted, no task stored, no partial write)", async () => {
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		const storeBefore = todoStore.tasks.length;
+		const counterBefore = todoStore.idCounter;
+
+		const result = await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					{
+						content: "Good task with bad metadata",
+						status: "pending",
+						priority: "medium",
+						metadata: "not-an-object" as unknown as undefined,
+					},
+				],
+			},
+			ctx,
+		);
+
+		// The tool returned an error message naming the malformed container.
+		expect(result.content[0].text).toMatch(/metadata rejected.*not an object/);
+
+		// Atomic: store is unchanged, no ID was minted, no tasks created.
+		expect(todoStore.tasks).toHaveLength(storeBefore);
+		expect(todoStore.idCounter).toBe(counterBefore);
+	});
+
+	it("todo_write with metadata: [1,2,3] (array) is atomic-rejected", async () => {
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		const counterBefore = todoStore.idCounter;
+
+		const result = await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					{
+						content: "Array metadata",
+						status: "pending",
+						priority: "medium",
+						metadata: [1, 2, 3] as unknown as undefined,
+					},
+				],
+			},
+			ctx,
+		);
+
+		expect(result.content[0].text).toMatch(/metadata rejected.*not an object.*array/);
+		expect(todoStore.idCounter).toBe(counterBefore);
+	});
+
+	it("todo_write with metadata: null is atomic-rejected", async () => {
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		const counterBefore = todoStore.idCounter;
+
+		const result = await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					{
+						content: "Null metadata",
+						status: "pending",
+						priority: "medium",
+						metadata: null as unknown as undefined,
+					},
+				],
+			},
+			ctx,
+		);
+
+		expect(result.content[0].text).toMatch(/metadata rejected.*not an object.*null/);
+		expect(todoStore.idCounter).toBe(counterBefore);
+	});
+
+	it("todo_write with mixed valid + malformed metadata: any malformed task rejects the whole write (no partial state)", async () => {
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		const storeBefore = todoStore.tasks.length;
+		const counterBefore = todoStore.idCounter;
+
+		const result = await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					{
+						content: "Good task",
+						status: "pending",
+						priority: "medium",
+						metadata: { k: "v" },
+					},
+					{
+						content: "Bad task with bad metadata",
+						status: "pending",
+						priority: "medium",
+						metadata: "broken" as unknown as undefined,
+					},
+				],
+			},
+			ctx,
+		);
+
+		// The whole write is rejected because one task is malformed.
+		expect(result.content[0].text).toMatch(/metadata rejected.*not an object/);
+		// No partial state: store length is unchanged from before the call.
+		// Neither the good task nor the bad task was stored.
+		expect(todoStore.tasks).toHaveLength(storeBefore);
+		// No ID was minted for either task.
+		expect(todoStore.idCounter).toBe(counterBefore);
+	});
+
+	it("todo_write with valid metadata (mixed types) is accepted (regression check)", async () => {
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+
+		const result = await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					{
+						content: "Good task with mixed-type metadata",
+						status: "pending",
+						priority: "medium",
+						metadata: { s: "x", n: 42, b: true },
+					},
+				],
+			},
+			ctx,
+		);
+
+		// No rejection.
+		expect(result.content[0].text).not.toMatch(/metadata rejected/);
+		expect(todoStore.tasks).toHaveLength(1);
+		expect(todoStore.tasks[0].metadata).toEqual({ s: "x", n: 42, b: true });
 	});
 });

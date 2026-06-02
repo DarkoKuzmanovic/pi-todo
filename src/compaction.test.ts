@@ -7,11 +7,12 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import todoExtension from "./index";
+import todoExtension, { runtime } from "./index";
 import { createTodoSnapshot, TODO_SNAPSHOT_CUSTOM_TYPE } from "./replay";
 import { store as todoStore } from "./state";
 import { COMPACT_WIDGET_KEY } from "./compact-widget";
 import type { Task } from "./types";
+import { isTombstoned } from "./tombstone";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -290,5 +291,234 @@ describe("compaction lifecycle: session_compact", () => {
 		await handler({} as unknown, ctx);
 
 		expect(todoStore.tasks).toEqual([]);
+	});
+});
+
+// ── M3-T3: Tombstone persistence through compaction/replay ─────────────────
+
+describe("M3-T3: tombstone persistence through compaction/replay", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		mockPi = buildMockPi();
+	});
+
+	// ── Helper: make a task with a tombstone marker ─────────────────────
+
+	function tombstoneTask(overrides: Partial<Task> = {}): Task {
+		return {
+			id: "tx",
+			content: "Removed task",
+			status: "pending",
+			priority: "low",
+			createdAt: 1000,
+			deletedAt: 1700000000000,
+			...overrides,
+		};
+	}
+
+	function liveTask(overrides: Partial<Task> = {}): Task {
+		return {
+			id: "t1",
+			content: "Live task",
+			status: "pending",
+			priority: "medium",
+			createdAt: 2000,
+			...overrides,
+		};
+	}
+	// ── Helper: snapshot-only branch (mirrors e2e.test.ts) ───────────────
+
+	function snapshotBranch(tasks: Task[]): readonly unknown[] {
+		return [
+			{
+				type: "custom",
+				customType: TODO_SNAPSHOT_CUSTOM_TYPE,
+				data: createTodoSnapshot({ tasks }),
+			},
+		];
+	}
+
+	// ── 1. Tombstone survives session_before_compact → session_compact ──
+
+	it("a tombstone survives session_before_compact → session_compact round-trip", async () => {
+		const tx = tombstoneTask();
+		const t1 = liveTask();
+		todoStore.tasks = [tx, t1];
+
+		// Seed the extension so session_before_compact/compact are registered
+		await todoExtension(mockPi.pi);
+
+		// Fire session_before_compact → append snapshot
+		const beforeHandler = mockPi.handlers.get("session_before_compact");
+		expect(beforeHandler).toBeTruthy();
+		const { ctx: ctxBefore } = buildCtx([], false);
+		await beforeHandler!({}, ctxBefore);
+
+		const entries = mockPi.appendedEntries;
+		expect(entries.length).toBe(1);
+		expect(entries[0]?.customType).toBe(TODO_SNAPSHOT_CUSTOM_TYPE);
+		const snapData = entries[0]?.data as { details: { tasks: Task[] } };
+		expect(snapData.details.tasks.length).toBe(2);
+		expect(snapData.details.tasks[0]?.deletedAt).toBe(1700000000000);
+		expect(snapData.details.tasks[1]?.deletedAt).toBeUndefined();
+
+		// Build a snapshot-only branch and fire session_compact
+		const branch = snapshotBranch([tx, t1]);
+		const { ctx } = buildCtx(branch, false);
+		// Re-register to pick up the handler after reset
+		mockPi.handlers.clear();
+		await todoExtension(mockPi.pi);
+		const compactHandler = mockPi.handlers.get("session_compact");
+		expect(compactHandler).toBeTruthy();
+		await compactHandler!({} as unknown, ctx);
+
+		// Store has the tombstone with deletedAt intact
+		expect(todoStore.tasks.length).toBe(2);
+		expect(todoStore.tasks[0]?.deletedAt).toBe(1700000000000);
+		expect(isTombstoned(todoStore.tasks[0]!)).toBe(true);
+		expect(todoStore.tasks[1]?.deletedAt).toBeUndefined();
+		expect(isTombstoned(todoStore.tasks[1]!)).toBe(false);
+
+		// Tracker also has the tombstone (same extractTasks)
+		const trackerTasks = [...runtime.tracker.tasks];
+		expect(trackerTasks.length).toBe(2);
+		expect(trackerTasks[0]?.deletedAt).toBe(1700000000000);
+		expect(isTombstoned(trackerTasks[0]!)).toBe(true);
+		expect(trackerTasks[1]?.deletedAt).toBeUndefined();
+		expect(isTombstoned(trackerTasks[1]!)).toBe(false);
+
+		// Store and tracker agree on the tombstoned set
+		const storeTombstonedIds = todoStore.tasks.filter((t) => isTombstoned(t)).map((t) => t.id);
+		const trackerTombstonedIds = trackerTasks.filter((t) => isTombstoned(t)).map((t) => t.id);
+		expect(storeTombstonedIds).toEqual(trackerTombstonedIds);
+		expect(storeTombstonedIds).toEqual(["tx"]);
+	});
+
+	// ── 2. Empty branch — store/tracker symmetric (no tombstones) ──────
+
+	it("empty branch: store and tracker agree on empty set", async () => {
+		await todoExtension(mockPi.pi);
+		const { ctx } = buildCtx([], false);
+		const handler = mockPi.handlers.get("session_compact")!;
+		await handler({} as unknown, ctx);
+
+		expect(todoStore.tasks).toEqual([]);
+		expect([...runtime.tracker.tasks]).toEqual([]);
+	});
+
+	// ── 3. Snapshot-only — tombstone survives ──────────────────────────
+
+	it("snapshot-only branch: tombstone reconstructs in store and tracker", async () => {
+		const tx = tombstoneTask();
+		await todoExtension(mockPi.pi);
+
+		const branch = snapshotBranch([tx]);
+		const { ctx } = buildCtx(branch, false);
+		const handler = mockPi.handlers.get("session_compact")!;
+		await handler({} as unknown, ctx);
+
+		expect(todoStore.tasks.length).toBe(1);
+		expect(todoStore.tasks[0]?.deletedAt).toBe(1700000000000);
+		expect(isTombstoned(todoStore.tasks[0]!)).toBe(true);
+
+		expect([...runtime.tracker.tasks].length).toBe(1);
+		expect(isTombstoned([...runtime.tracker.tasks][0]!)).toBe(true);
+	});
+
+	// ── 4. Snapshot + later tool-result — latest wins ──────────────────
+
+	it("snapshot + later tool-result: latest wins, store/tracker agree", async () => {
+		const tOld = tombstoneTask({ id: "old" });
+		const tNew = liveTask({ id: "new", content: "Latest only" });
+		await todoExtension(mockPi.pi);
+
+		// Branch: snapshot first (old tombstone), then a tool_result with new task
+		const branch = [
+			{
+				type: "custom",
+				customType: TODO_SNAPSHOT_CUSTOM_TYPE,
+				data: createTodoSnapshot({ tasks: [tOld] }),
+			},
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "todo_write",
+					details: { tasks: [tNew] },
+				},
+			},
+		];
+		const { ctx } = buildCtx(branch, false);
+		const handler = mockPi.handlers.get("session_compact")!;
+		await handler({} as unknown, ctx);
+
+		// Latest (tool-result) wins: only tNew, no tombstone
+		expect(todoStore.tasks.length).toBe(1);
+		expect(todoStore.tasks[0]?.id).toBe("new");
+		expect(todoStore.tasks[0]?.deletedAt).toBeUndefined();
+
+		const trackerTasks = [...runtime.tracker.tasks];
+		expect(trackerTasks.length).toBe(1);
+		expect(trackerTasks[0]?.id).toBe("new");
+
+		// Store and tracker agree
+		expect(todoStore.tasks.map((t) => t.id)).toEqual(trackerTasks.map((t) => t.id));
+	});
+
+	// ── 5. Tool-result-only — tombstone from tool result survives ──────
+
+	it("tool-result-only branch: tombstone preserves in store and tracker", async () => {
+		const tx = tombstoneTask();
+		await todoExtension(mockPi.pi);
+
+		const branch = [
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "todo_write",
+					details: { tasks: [tx] },
+				},
+			},
+		];
+		const { ctx } = buildCtx(branch, false);
+		const handler = mockPi.handlers.get("session_compact")!;
+		await handler({} as unknown, ctx);
+
+		expect(todoStore.tasks.length).toBe(1);
+		expect(todoStore.tasks[0]?.deletedAt).toBe(1700000000000);
+		expect(isTombstoned(todoStore.tasks[0]!)).toBe(true);
+
+		expect([...runtime.tracker.tasks].length).toBe(1);
+		expect(isTombstoned([...runtime.tracker.tasks][0]!)).toBe(true);
+	});
+
+	// ── 6. Malformed-latest — symmetric clear ──────────────────────────
+
+	it("malformed-latest details: store and tracker clear symmetrically", async () => {
+		const t1 = liveTask();
+		// Pre-populate store so we can verify it gets cleared
+		todoStore.tasks = [t1];
+		await todoExtension(mockPi.pi);
+
+		// Branch with a snapshot whose details is null/malformed
+		const branch = [
+			{
+				type: "custom",
+				customType: TODO_SNAPSHOT_CUSTOM_TYPE,
+				data: { version: 1, details: null },
+			},
+		];
+		const { ctx } = buildCtx(branch, false);
+		const handler = mockPi.handlers.get("session_compact")!;
+		await handler({} as unknown, ctx);
+
+		// Store cleared (extractTasks returns null → falls back to [])
+		expect(todoStore.tasks).toEqual([]);
+		// Tracker also cleared (reconstructFromDetails returns false → stays at reset [])
+		expect([...runtime.tracker.tasks]).toEqual([]);
 	});
 });

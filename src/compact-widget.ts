@@ -149,14 +149,20 @@ function buildRenderable(
 				return [truncateToColumns(celebration, width)];
 			}
 
-			let left = "";
-			if (active) {
-				const badge = priorityBadge(active.priority);
-				const decorated = badge ? `${badge} ${active.content}` : active.content;
-				left = `${tf("accent", "\uf111")} ${decorated}${tf("muted", `  ${tracker.formatElapsed(active)}`)}`;
-			} else if (pending > 0) {
-				left = tf("muted", `\uf4aa ${pending} pending, ${completed} done`);
-			}
+		let left = "";
+		if (active) {
+			const badge = priorityBadge(active.priority);
+			// M4 — M-c: surface `description` in the compact widget as a
+			// compact marker next to the active content. Full text is not
+			// preserved (widget is single-line, prompt-budget discipline);
+			// reference content lives in /todos and the renderResult. owner
+			// is /todos-only; metadata is hidden.
+			const descSuffix = active.description ? ` — ${active.description}` : "";
+			const decorated = badge ? `${badge} ${active.content}` : active.content;
+			left = `${tf("accent", "\uf111")} ${decorated}${descSuffix}${tf("muted", `  ${tracker.formatElapsed(active)}`)}`;
+		} else if (pending > 0) {
+			left = tf("muted", `\uf4aa ${pending} pending, ${completed} done`);
+		}
 
 			// Blocked count: a small, non-crowding segment.
 			const allTasks = [...tracker.tasks];

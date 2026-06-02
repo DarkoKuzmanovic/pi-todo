@@ -1,4 +1,6 @@
 import type { Task } from "./types";
+import { activeTasks } from "./tombstone";
+import { extractRichFields } from "./rich-fields";
 
 // ── Diff result ────────────────────────────────────────────────────────────
 
@@ -33,19 +35,19 @@ export class TaskTracker {
 	}
 
 	get activeTask(): Task | undefined {
-		return this._tasks.find((t) => t.status === "in_progress");
+		return this.#liveTasks().find((t) => t.status === "in_progress");
 	}
 
 	get totalCount(): number {
-		return this._tasks.length;
+		return this.#liveTasks().length;
 	}
 
 	get pendingCount(): number {
-		return this._tasks.filter((t) => t.status === "pending").length;
+		return this.#liveTasks().filter((t) => t.status === "pending").length;
 	}
 
 	get completedCount(): number {
-		return this._tasks.filter((t) => t.status === "completed").length;
+		return this.#liveTasks().filter((t) => t.status === "completed").length;
 	}
 
 	/** Replaces current state from a pi-todo details.tasks payload.
@@ -64,14 +66,17 @@ export class TaskTracker {
 
 	/** Compute transitions since the last snapshot. */
 	diff(): DiffResult {
-		const prevMap = new Map(this._prevSnapshot.map((t) => [t.id, t]));
-		const currMap = new Map(this._tasks.map((t) => [t.id, t]));
+		const liveCurr = this.#liveTasks();
+		const livePrev = activeTasks(this._prevSnapshot);
+
+		const prevMap = new Map(livePrev.map((t) => [t.id, t]));
+		const currMap = new Map(liveCurr.map((t) => [t.id, t]));
 
 		const completed: Task[] = [];
 		const started: Task[] = [];
 		const created: Task[] = [];
 
-		for (const task of this._tasks) {
+		for (const task of liveCurr) {
 			const prev = prevMap.get(task.id);
 			if (!prev) {
 				created.push(task);
@@ -85,7 +90,8 @@ export class TaskTracker {
 			}
 		}
 
-		const removedIds = this._prevSnapshot
+		// removedIds = livePrev ids not in liveCurr (incl. live→tombstoned)
+		const removedIds = livePrev
 			.filter((t) => !currMap.has(t.id))
 			.map((t) => t.id);
 
@@ -94,9 +100,9 @@ export class TaskTracker {
 			started,
 			created,
 			removedIds,
-			total: this._tasks.length,
-			active: this._tasks.filter((t) => t.status === "in_progress").length,
-			done: this._tasks.filter((t) => t.status === "completed").length,
+			total: liveCurr.length,
+			active: liveCurr.filter((t) => t.status === "in_progress").length,
+			done: liveCurr.filter((t) => t.status === "completed").length,
 		};
 	}
 
@@ -116,6 +122,11 @@ export class TaskTracker {
 		if (min < 60) return `${min}m ${sec % 60}s`;
 		const hr = Math.floor(min / 60);
 		return `${hr}h ${min % 60}m`;
+	}
+
+	/** Live (non-tombstoned) task view for derived getters/diff. */
+	#liveTasks(): Task[] {
+		return activeTasks(this._tasks);
 	}
 }
 
@@ -144,6 +155,15 @@ export function extractTasks(details: unknown): Task[] | null {
 			startedAt: t.startedAt != null ? Number(t.startedAt) : undefined,
 			completedAt: t.completedAt != null ? Number(t.completedAt) : undefined,
 			blockedBy: extractBlockedBy(t.blockedBy),
+			deletedAt: t.deletedAt != null ? Number(t.deletedAt) : undefined,
+			// M4 — rich fields. Sibling-consistent safe coercion for the three
+			// user-authored strings (drop when not a string). Metadata goes through
+			// extractRichFields for B1 type-preserving passthrough + defensive
+			// flatness re-validation on history.
+			description: typeof t.description === "string" ? t.description : undefined,
+			owner: typeof t.owner === "string" ? t.owner : undefined,
+			activeForm: typeof t.activeForm === "string" ? t.activeForm : undefined,
+			metadata: extractRichFields(t.metadata),
 		});
 	}
 	return tasks;

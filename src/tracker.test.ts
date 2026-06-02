@@ -102,6 +102,111 @@ describe("TaskTracker", () => {
 		});
 	});
 
+	describe("derived getters exclude tombstoned tasks", () => {
+		it("totalCount excludes tombstoned tasks", () => {
+			const tracker = new TaskTracker();
+			tracker.reconstructFromDetails({
+				tasks: [
+					makeTask({ id: "t1" }),
+					makeTask({ id: "t2", deletedAt: Date.now() }),
+					makeTask({ id: "t3" }),
+				],
+			});
+			expect(tracker.totalCount).toBe(2);
+		});
+
+		it("pendingCount excludes tombstoned tasks", () => {
+			const tracker = new TaskTracker();
+			tracker.reconstructFromDetails({
+				tasks: [
+					makeTask({ id: "t1", status: "pending" }),
+					makeTask({ id: "t2", status: "pending", deletedAt: 999 }),
+					makeTask({ id: "t3", status: "pending" }),
+				],
+			});
+			expect(tracker.pendingCount).toBe(2);
+		});
+
+		it("completedCount excludes tombstoned tasks", () => {
+			const tracker = new TaskTracker();
+			tracker.reconstructFromDetails({
+				tasks: [
+					makeTask({ id: "t1", status: "completed" }),
+					makeTask({ id: "t2", status: "completed", deletedAt: 1 }),
+				],
+			});
+			expect(tracker.completedCount).toBe(1);
+		});
+
+		it("activeTask excludes tombstoned tasks", () => {
+			const tracker = new TaskTracker();
+			tracker.reconstructFromDetails({
+				tasks: [
+					makeTask({ id: "t1", status: "in_progress", deletedAt: 1 }),
+					makeTask({ id: "t2", status: "in_progress" }),
+				],
+			});
+			expect(tracker.activeTask?.id).toBe("t2");
+		});
+
+		it("diff counts exclude tombstoned tasks", () => {
+			const tracker = new TaskTracker();
+			// Seed: 3 live tasks
+			tracker.reconstructFromDetails({
+				tasks: [
+					makeTask({ id: "t1", status: "pending" }),
+					makeTask({ id: "t2", status: "pending" }),
+					makeTask({ id: "t3", status: "in_progress" }),
+				],
+			});
+			// Now: t3 completed, t1 removed (tombstoned)
+			tracker.reconstructFromDetails({
+				tasks: [
+					makeTask({ id: "t1", status: "pending", deletedAt: 999 }),
+					makeTask({ id: "t2", status: "pending" }),
+					makeTask({ id: "t3", status: "completed" }),
+				],
+			});
+			const diff = tracker.diff();
+			expect(diff.total).toBe(2); // t1 (tombstoned) excluded
+			expect(diff.active).toBe(0);
+			expect(diff.done).toBe(1);
+		});
+
+		it("diff arrays exclude tombstoned tasks and treat live→tombstoned as removed", () => {
+			const tracker = new TaskTracker();
+			// Seed: t1 active, t2 pending, t3 pending
+			tracker.reconstructFromDetails({
+				tasks: [
+					makeTask({ id: "t1", status: "in_progress" }),
+					makeTask({ id: "t2", status: "pending" }),
+					makeTask({ id: "t3", status: "pending" }),
+				],
+			});
+			// Now: t1 completed, t2 stays pending, t3 tombstoned
+			tracker.reconstructFromDetails({
+				tasks: [
+					makeTask({ id: "t1", status: "completed" }),
+					makeTask({ id: "t2", status: "pending" }),
+					makeTask({ id: "t3", status: "pending", deletedAt: 999 }),
+				],
+			});
+			const d = tracker.diff();
+			// t3 was live before, now tombstoned → must be in removedIds
+			expect(d.removedIds).toContain("t3");
+			// t1 completed
+			expect(d.completed).toHaveLength(1);
+			expect(d.completed[0].id).toBe("t1");
+			// t2 unchanged
+			expect(d.created).toHaveLength(0);
+			expect(d.started).toHaveLength(0);
+			// counts: only t1 and t2 are live
+			expect(d.total).toBe(2);
+			expect(d.done).toBe(1);
+			expect(d.active).toBe(0);
+		});
+	});
+
 	describe("activeTask", () => {
 		it("returns the first in_progress task", () => {
 			const tracker = new TaskTracker();

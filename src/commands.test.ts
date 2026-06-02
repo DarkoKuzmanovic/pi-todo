@@ -182,6 +182,16 @@ describe("/done", () => {
 		expect(notifications[0]?.type).toBe("info");
 		expect(taskStates()).toEqual([{ id: "t1", status: "in_progress" }]);
 	});
+
+	it("says not found for tombstoned task", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [makeTask({ id: "t1", status: "pending", deletedAt: 1 })],
+		});
+		const cmd = fakeApi.commands.get("done");
+		const { ctx, notifications } = buildCommandContext();
+		await cmd?.handler("t1", ctx);
+		expect(notifications[0]?.message).toContain("not found");
+	});
 });
 
 // ── /start ──────────────────────────────────────────────────────────────────
@@ -274,6 +284,113 @@ describe("/start", () => {
 		await cmd?.handler("t1", ctx);
 		const blockedNote = notifications.find((n) => n.message.includes("blocked by"));
 		expect(blockedNote).toBeUndefined();
+	});
+
+	it("says not found for tombstoned task", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [makeTask({ id: "t1", status: "pending", deletedAt: 1 })],
+		});
+		const cmd = fakeApi.commands.get("start");
+		const { ctx, notifications } = buildCommandContext();
+		await cmd?.handler("t1", ctx);
+		expect(notifications[0]?.message).toContain("not found");
+	});
+
+	// ── M4 fix-back: M3 tombstone-aware follow-up ────────────────────
+	// /start must not leak tombstoned dep IDs into the follow-up message
+	// (M3 "dead id never printed" invariant). It uses activeBlockerIds
+	// instead of raw task.blockedBy.
+	it("M3: /start on a blocked task filters tombstoned dep ids out of the follow-up", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t-live", content: "Live dep", status: "pending" }),
+				makeTask({ id: "t-dead", content: "Dead dep", status: "completed", deletedAt: 1 }),
+				makeTask({
+					id: "t-target",
+					content: "Doomed",
+					status: "pending",
+					blockedBy: ["t-live", "t-dead"],
+				}),
+			],
+		});
+		const cmd = fakeApi.commands.get("start");
+		const { ctx, notifications } = buildCommandContext();
+		await cmd?.handler("t-target", ctx);
+
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0]!;
+		expect(msg.content).toContain("incomplete dependencies");
+		// Live dep IS in the follow-up
+		expect(msg.content).toContain("t-live");
+		// Tombstoned dep is NOT in the follow-up (M3 invariant)
+		expect(msg.content).not.toContain("t-dead");
+		// The notification that lists blockers also must not mention the dead id
+		const blockedNote = notifications.find(
+			(n) => n.type === "info" && n.message.includes("blocked by"),
+		);
+		expect(blockedNote?.message).toContain("t-live");
+		expect(blockedNote?.message).not.toContain("t-dead");
+	});
+
+	// ── M4 fix-back: M-f activeForm surfacing in /start ──────────────
+	// /start must include the activeForm label in the follow-up when
+	// the task has one, so the agent can phrase its acknowledgement
+	// with the present-progressive form.
+	it("M-f: /start on a task with activeForm includes 'Currently <activeForm>' in the follow-up", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Write code",
+					status: "pending",
+					activeForm: "writing code",
+				}),
+			],
+		});
+		const cmd = fakeApi.commands.get("start");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("t1", ctx);
+
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0]!;
+		expect(msg.content).toContain("Currently writing code");
+	});
+
+	it("M-f: /start on a task with activeForm AND blocked deps includes 'Currently <activeForm>' in the follow-up", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t-dep", content: "Blocker", status: "pending" }),
+				makeTask({
+					id: "t-target",
+					content: "Doomed",
+					status: "pending",
+					blockedBy: ["t-dep"],
+					activeForm: "working on doomed",
+				}),
+			],
+		});
+		const cmd = fakeApi.commands.get("start");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("t-target", ctx);
+
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0]!;
+		expect(msg.content).toContain("Currently working on doomed");
+		expect(msg.content).toContain("incomplete dependencies");
+		expect(msg.content).toContain("t-dep");
+	});
+
+	it("M-f: /start on a task WITHOUT activeForm does not include 'Currently ...' in the follow-up", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [makeTask({ id: "t1", content: "Write code", status: "pending" })],
+		});
+		const cmd = fakeApi.commands.get("start");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("t1", ctx);
+
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0]!;
+		expect(msg.content).not.toContain("Currently");
 	});
 });
 // ── /next ───────────────────────────────────────────────────────────────────
@@ -434,6 +551,115 @@ describe("/next", () => {
 		expect(fakeApi.sentMessages).toHaveLength(1);
 		expect(fakeApi.sentMessages[0]?.content).toContain("t2");
 	});
+
+	// ── M3-T2: tombstone-aware command selection ──────────────────────
+
+	it("skips tombstoned in_progress task", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", status: "in_progress", deletedAt: Date.now() }),
+				makeTask({ id: "t2", status: "pending" }),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("", ctx);
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0];
+		// Should only suggest starting t2 (pending), not completing t1
+		expect(msg?.content).toContain("t2");
+		expect(msg?.content).not.toContain("t1");
+	});
+
+	it("with only tombstoned tasks reports no tasks", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [makeTask({ id: "t1", status: "pending", deletedAt: 1 })],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx, notifications } = buildCommandContext();
+		await cmd?.handler("", ctx);
+		expect(notifications[0]?.message).toContain("No tasks");
+	});
+
+	it("ignores tombstoned tasks in blocked/unblocked selection", async () => {
+		// t1 blocked by t2 (both live), t3 is tombstoned. /next should pick t2,
+		// not report blocked, and not pick tombstoned t3.
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", status: "pending", blockedBy: ["t2"] }),
+				makeTask({ id: "t2", status: "pending" }),
+				makeTask({ id: "t3", status: "pending", deletedAt: 1 }),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("", ctx);
+		// Should advance to t2, not report blocked and not pick tombstoned t3
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		expect(fakeApi.sentMessages[0]?.content).toContain("t2");
+	});
+
+	// ── M4 fix-back: M-f activeForm surfacing in /next ──────────────────
+	// /next must include the activeForm label in the follow-up when the
+	// active and/or next-up task has one, so the agent can phrase its
+	// acknowledgement with the present-progressive form.
+	it("M-f: /next includes 'Currently <activeForm>' for the active task when it has one", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Current",
+					status: "in_progress",
+					activeForm: "doing the current thing",
+				}),
+				makeTask({ id: "t2", content: "Next up", status: "pending" }),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("", ctx);
+
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0]!;
+		expect(msg.content).toContain("Currently doing the current thing");
+	});
+
+	it("M-f: /next includes 'Currently <activeForm>' for the next-up task when it has one", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Current", status: "in_progress" }),
+				makeTask({
+					id: "t2",
+					content: "Next up",
+					status: "pending",
+					activeForm: "starting the next thing",
+				}),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("", ctx);
+
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0]!;
+		expect(msg.content).toContain("Currently starting the next thing");
+	});
+
+	it("M-f: /next does not include 'Currently ...' when neither task has activeForm", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Current", status: "in_progress" }),
+				makeTask({ id: "t2", content: "Next up", status: "pending" }),
+			],
+		});
+		const cmd = fakeApi.commands.get("next");
+		const { ctx } = buildCommandContext();
+		await cmd?.handler("", ctx);
+
+		expect(fakeApi.sentMessages).toHaveLength(1);
+		const msg = fakeApi.sentMessages[0]!;
+		expect(msg.content).not.toContain("Currently");
+	});
 });
 
 // ── /pause ──────────────────────────────────────────────────────────────────
@@ -468,5 +694,18 @@ describe("/pause", () => {
 		expect(msg?.options).toEqual({ deliverAs: "followUp" });
 		expect(taskStates()).toEqual([{ id: "t1", status: "in_progress" }]);
 		expect(notifications[0]?.type).toBe("info");
+	});
+
+	it("says not found for tombstoned active task", async () => {
+		runtime.tracker.reconstructFromDetails({
+			tasks: [makeTask({ id: "t1", content: "Removed task", status: "in_progress", deletedAt: 1 })],
+		});
+		const cmd = fakeApi.commands.get("pause");
+		const { ctx, notifications } = buildCommandContext();
+		await cmd?.handler("", ctx);
+		// No active task (tombstoned) → same as "no active task" flow
+		expect(notifications[0]?.type).toBe("info");
+		expect(notifications[0]?.message).toContain("No active");
+		expect(fakeApi.sentMessages).toHaveLength(0);
 	});
 });

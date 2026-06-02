@@ -143,13 +143,33 @@ export function findCycle(tasks: readonly Task[]): string[] | null {
  */
 export function isBlocked(task: Task, allTasks: readonly Task[]): boolean {
 	if (task.status === "completed") return false;
+	// A tombstoned task is never blocked (defense-in-depth for reconstructed state).
+	if (task.deletedAt != null) return false;
 	if (!task.blockedBy || task.blockedBy.length === 0) return false;
 	const byId = new Map(allTasks.map((t) => [t.id, t]));
 	for (const depId of task.blockedBy) {
 		const dep = byId.get(depId);
-		if (dep && dep.status !== "completed") return true;
+		// Tombstoned dependencies are treated as resolved (gone).
+		if (dep && dep.status !== "completed" && dep.deletedAt == null) return true;
 	}
 	return false;
+}
+
+/**
+ * Returns the `blockedBy` IDs that are actively blocking `task`.
+ * A dep is actively blocking when it exists in `allTasks`, is not
+ * completed, and is not tombstoned. Mirrors `isBlocked`'s predicate
+ * exactly so the two never diverge.
+ */
+export function activeBlockerIds(task: Task, allTasks: readonly Task[]): string[] {
+	if (task.status === "completed") return [];
+	if (task.deletedAt != null) return [];
+	if (!task.blockedBy || task.blockedBy.length === 0) return [];
+	const byId = new Map(allTasks.map((t) => [t.id, t]));
+	return task.blockedBy.filter((depId) => {
+		const dep = byId.get(depId);
+		return dep && dep.status !== "completed" && dep.deletedAt == null;
+	});
 }
 
 /**

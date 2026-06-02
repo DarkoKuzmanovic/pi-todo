@@ -17,7 +17,7 @@ A Pi CLI extension that gives the agent a structured task list to prevent **goal
 |------|-------------|
 | `todo_write` | Replace the entire task list (atomic update) — always pass all tasks |
 | `todo_read` | Read the current task list and statuses |
-| `todo_remove` | Permanently remove tasks by ID — use for cleanup, not for completed tasks |
+| `todo_remove` | Soft-delete tasks by ID — hidden from active views but retained in history for audit/replay |
 
 ### Optional dependency metadata
 
@@ -43,7 +43,7 @@ In this example `t2` is unblocked only once `t1` is `completed`; `t3` is unblock
 - Unknown dependency IDs (no matching task in the list) are stripped and a warning is appended to the tool result text.
 - Dependencies on completed tasks are allowed and never produce a warning.
 - Dependency cycles are rejected atomically — the canonical store is not changed and the tool result reports the cycle.
-- `todo_remove` is dependency-agnostic; a previously-valid dependency that points to a now-removed task is reported as an unknown ID on the next `todo_write`.
+- `todo_remove` is now soft-delete (tombstones): removed tasks are hidden from all active views but retained in history and survive compaction/replay. A `blockedBy` reference to a tombstoned task no longer blocks the dependent; tombstoned dependency IDs are stripped from blockers on the next `todo_write`.
 
 **Visible behavior:**
 
@@ -54,6 +54,30 @@ In this example `t2` is unblocked only once `t1` is `completed`; `t3` is unblock
 - The compact above-editor widget shows a small `⊘ N blocked` segment when pending tasks are blocked.
 - Blocked state is **derived**, not stored: a task becomes unblocked automatically as soon as its dependencies are `completed`.
 
+## Optional rich task fields (M4)
+
+Each task may carry four additional optional fields for richer context, all omitted by default:
+
+| Field | Type | Prompt | `/todos` | Widget | Description |
+|-------|------|:------:|:--------:|:------:|-------------|
+| `description` | `string` | — | ✓ | ✓ | Long-form reference notes for context; visible in `/todos` and compact widget, never in the prompt to keep the prompt budget tight
+| `activeForm` | `string` | ✓ | ✓ | — | Short present-progressive label (e.g. "writing tests"). Used as the active-task label in the system prompt (safely escaped for I3 delimiter protection) and in `/todos`; not shown in the widget
+| `owner` | `string` | — | ✓ | — | Free-form agent/user attribution (e.g. `"agent-1"`, `"user"`). Surfaces only in `/todos` and tool results
+| `metadata` | `Record<string, string | number | boolean>` | — | — | — | Flat key-value bag for programmatic metadata. **Hidden on every surface** — canonical state + replay/snapshot only, reserved for future surfacing. Per-key validation rejects nested objects, arrays, and `null` (I1 policy)
+
+### Type safety for `metadata`
+
+- Values are limited to `string`, `number`, or `boolean` — no `null`, no nested objects, no arrays.
+- Invalid keys are dropped per-key with a named warning (e.g. `metadata.foo dropped: nested objects not allowed`).
+- The whole task is rejected only if the metadata container itself is malformed (not an object).
+- On replay, types are preserved byte-identical: a `number` stays a `number`, a `boolean` stays a `boolean` (B1 invariant).
+- A malformed historical metadata entry is defensively re-validated and never crashes replay.
+
+### Resurrection invariant
+
+When a tombstoned task (removed via `todo_remove`) is re-sent via `todo_write` (resurrection), 
+the new payload's rich fields are authoritative — there is no merge-back from the pre-tombstone 
+audit-retained payload (I2 invariant).
 ## Task statuses
 
 | Status | Icon | Meaning |

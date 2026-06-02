@@ -7,6 +7,7 @@ import {
 	normalizeBlockedBy,
 	validateDependencyGraph,
 } from "./deps";
+import { activeBlockerIds } from "./deps";
 import { extractTasks } from "./tracker";
 import type { Task } from "./types";
 
@@ -28,6 +29,10 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 describe("dedupeBlockedBy", () => {
 	it("returns undefined for tasks without blockedBy", () => {
 		expect(dedupeBlockedBy(makeTask())).toBeUndefined();
+	});
+
+	it("returns undefined for an empty blockedBy array", () => {
+		expect(dedupeBlockedBy(makeTask({ blockedBy: [] }))).toBeUndefined();
 	});
 
 	it("strips self-dependencies", () => {
@@ -76,6 +81,13 @@ describe("normalizeBlockedBy", () => {
 		const { tasks: cleaned, strippedUnknown } = normalizeBlockedBy(tasks);
 		expect(cleaned[0]?.blockedBy).toBeUndefined();
 		expect(cleaned[1]?.blockedBy).toBeUndefined();
+		expect(strippedUnknown).toEqual([]);
+	});
+
+	it("drops an empty blockedBy array entirely", () => {
+		const tasks = [makeTask({ id: "t1", blockedBy: [] }), makeTask({ id: "t2" })];
+		const { tasks: cleaned, strippedUnknown } = normalizeBlockedBy(tasks);
+		expect(cleaned[0]?.blockedBy).toBeUndefined();
 		expect(strippedUnknown).toEqual([]);
 	});
 
@@ -247,5 +259,144 @@ describe("extractBlockedBy — module cross-check", () => {
 		const extracted = extractTasks(details);
 		expect(extracted).not.toBeNull();
 		expect(extracted![0]?.blockedBy).toEqual(["t2", "t99"]); // t99 NOT stripped during replay
+	});
+});
+
+// ── M3-T1: extractTasks deletedAt round-trip ────────────────────────────────
+
+describe("extractTasks deletedAt round-trip", () => {
+	it("round-trips deletedAt faithfully through extractTasks", () => {
+		const details = {
+			tasks: [
+				{ id: "t1", content: "A", status: "pending", priority: "high", createdAt: 0 },
+				{ id: "t2", content: "B", status: "pending", priority: "high", createdAt: 0, deletedAt: 1700000000000 },
+			],
+		};
+		const extracted = extractTasks(details);
+		expect(extracted).not.toBeNull();
+		expect(extracted![0]?.deletedAt).toBeUndefined();
+		expect(extracted![1]?.deletedAt).toBe(1700000000000);
+	});
+
+	it("coerces deletedAt to number", () => {
+		const details = {
+			tasks: [
+				{ id: "t1", content: "A", status: "pending", priority: "medium", createdAt: 0, deletedAt: "1700000000000" },
+			],
+		};
+		const extracted = extractTasks(details);
+		expect(extracted![0]?.deletedAt).toBe(1700000000000);
+	});
+
+	it("handles null deletedAt as undefined", () => {
+		const details = {
+			tasks: [
+				{ id: "t1", content: "A", status: "pending", priority: "medium", createdAt: 0, deletedAt: null },
+			],
+		};
+		const extracted = extractTasks(details);
+		expect(extracted![0]?.deletedAt).toBeUndefined();
+	});
+});
+
+// ── M3-T1: isBlocked ignores tombstoned tasks ────────────────────────────────
+
+describe("isBlocked with tombstones", () => {
+	it("returns false when the task itself is tombstoned", () => {
+		const t1 = makeTask({ id: "t1" });
+		const t2 = makeTask({ id: "t2", blockedBy: ["t1"], deletedAt: 999 });
+		expect(isBlocked(t2, [t1, t2])).toBe(false);
+	});
+
+	it("returns false when all blocking deps are tombstoned", () => {
+		const t1 = makeTask({ id: "t1", deletedAt: 999 });
+		const t2 = makeTask({ id: "t2", blockedBy: ["t1"] });
+		expect(isBlocked(t2, [t1, t2])).toBe(false);
+	});
+
+	it("returns true when a live dep exists alongside a tombstoned one", () => {
+		const t1 = makeTask({ id: "t1", deletedAt: 999 });
+		const t2 = makeTask({ id: "t2" });
+		const t3 = makeTask({ id: "t3", blockedBy: ["t1", "t2"] });
+		expect(isBlocked(t3, [t1, t2, t3])).toBe(true);
+	});
+});
+
+
+// ── Issue 2: activeBlockerIds ────────────────────────────────────────────────
+
+describe("activeBlockerIds", () => {
+	it("returns only live, non-completed dependency IDs", () => {
+		const t1 = makeTask({ id: "t1" });
+		const t2 = makeTask({ id: "t2" });
+		const blocked = makeTask({ id: "t3", blockedBy: ["t1", "t2"] });
+		expect(activeBlockerIds(blocked, [t1, t2, blocked])).toEqual(["t1", "t2"]);
+	});
+
+	it("excludes completed dependencies", () => {
+		const t1 = makeTask({ id: "t1", status: "completed" });
+		const t2 = makeTask({ id: "t2" });
+		const blocked = makeTask({ id: "t3", blockedBy: ["t1", "t2"] });
+		expect(activeBlockerIds(blocked, [t1, t2, blocked])).toEqual(["t2"]);
+	});
+
+	it("excludes tombstoned dependencies", () => {
+		const t1 = makeTask({ id: "t1", deletedAt: 1 });
+		const t2 = makeTask({ id: "t2" });
+		const blocked = makeTask({ id: "t3", blockedBy: ["t1", "t2"] });
+		expect(activeBlockerIds(blocked, [t1, t2, blocked])).toEqual(["t2"]);
+	});
+
+	it("returns empty when all deps are tombstoned or completed", () => {
+		const t1 = makeTask({ id: "t1", deletedAt: 1 });
+		const t2 = makeTask({ id: "t2", status: "completed" });
+		const blocked = makeTask({ id: "t3", blockedBy: ["t1", "t2"] });
+		expect(activeBlockerIds(blocked, [t1, t2, blocked])).toEqual([]);
+	});
+
+	it("returns empty for a task without blockedBy", () => {
+		const t = makeTask({ id: "t1" });
+		expect(activeBlockerIds(t, [t])).toEqual([]);
+	});
+
+	it("excludes unknown IDs (mirrors isBlocked)", () => {
+		const t = makeTask({ id: "t1", blockedBy: ["t99"] });
+		expect(activeBlockerIds(t, [t])).toEqual([]);
+	});
+
+	it("only counts live non-completed deps when mixed with tombstoned and completed", () => {
+		const t1 = makeTask({ id: "t1", deletedAt: 1 });
+		const t2 = makeTask({ id: "t2", status: "completed" });
+		const t3 = makeTask({ id: "t3" });
+		const blocked = makeTask({ id: "t4", blockedBy: ["t1", "t2", "t3"] });
+		expect(activeBlockerIds(blocked, [t1, t2, t3, blocked])).toEqual(["t3"]);
+	});
+});
+
+describe("M4 M-d: rich fields do not affect blocked state", () => {
+	it("isBlocked returns identical result for a task with rich fields vs without (M-d)", () => {
+		const dep = makeTask({ id: "dep", status: "completed" });
+		const blocker = makeTask({ id: "blocker", status: "pending" });
+
+		// Task WITH rich fields — should compute identical block state
+		const taskWithout: Task = makeTask({
+			id: "t1",
+			status: "pending",
+			blockedBy: ["blocker"],
+		});
+		const taskWith: Task = {
+			...taskWithout,
+			description: "notes",
+			owner: "me",
+			activeForm: "working",
+			metadata: { key: "value" },
+		};
+
+		expect(isBlocked(taskWithout, [dep, blocker, taskWithout])).toBe(
+			isBlocked(taskWith, [dep, blocker, taskWith]),
+		);
+		expect(activeBlockerIds(taskWithout, [dep, blocker, taskWithout])).toEqual(
+			activeBlockerIds(taskWith, [dep, blocker, taskWith]),
+		);
 	});
 });

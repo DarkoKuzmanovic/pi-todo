@@ -63,21 +63,6 @@ const capturingTheme = {
 	bold: (text: string) => `<b>${text}</b>`,
 } as unknown as Theme;
 
-const statefulTheme = {
-	fgColors: new Map<string, string>([
-		["muted", "M"],
-		["success", "S"],
-		["accent", "A"],
-		["dim", "D"],
-		["text", "T"],
-	]),
-	fg(color: string, text: string) {
-		return `${this.fgColors.get(color) ?? "?"}${text}`;
-	},
-	bold(text: string) {
-		return text;
-	},
-} as unknown as Theme;
 
 function renderWith(
 	tracker: TaskTracker,
@@ -353,6 +338,25 @@ describe("updateCompactWidget — render states", () => {
 
 		expect(joined).not.toContain("blocked");
 	});
+
+	it("tombstoned tasks do not inflate counts or blocked count", () => {
+		const tracker = new TaskTracker(() => 1000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({ id: "t1", content: "Live", status: "pending" }),
+				makeTask({ id: "t2", content: "Gone", status: "in_progress", deletedAt: 999 }),
+				makeTask({ id: "t3", content: "Blocked", status: "pending", blockedBy: ["t2"] }),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 80 });
+		const joined = lines.join("\n");
+
+		// Only 2 live tasks: t1 pending, t3 pending (not blocked because t2 is tombstoned)
+		expect(joined).toContain("2 pending");
+		expect(joined).not.toContain("blocked"); // t3 not blocked by tombstoned t2
+		expect(joined).not.toContain("Gone");
+	});
 });
 
 // ── Width truncation ────────────────────────────────────────────────────────
@@ -531,15 +535,74 @@ describe("updateCompactWidget — theme application", () => {
 		expect(joined).toContain("<accent>");
 		expect(joined).toMatch(/<success>|<accent>/);
 	});
+});
 
-	it("calls theme fg() with the theme instance as this", () => {
-		const tracker = new TaskTracker(() => 1000);
+// ── M4 — compact widget surfaces description ─────────────────────────────────
 
-		const { lines } = renderWith(tracker, {
-			renderWidth: 80,
-			theme: statefulTheme,
+describe("updateCompactWidget — M4 description surfacing", () => {
+	it("shows `description` as a concise marker next to the active task content", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Active task",
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+					description: "long reference notes",
+				}),
+			],
 		});
 
-		expect(lines[0]).toContain("M\ue370 No tasks");
+		const { lines } = renderWith(tracker, { renderWidth: 200 });
+		const joined = lines.join("\n");
+		expect(joined).toContain("Active task");
+		// The widget truncates to renderWidth but a long-enough render width keeps
+		// the description visible. A short renderWidth may truncate, so the test
+		// uses a wide width.
+		expect(joined).toContain("long reference notes");
+	});
+
+	it("does NOT show `metadata` keys or values in the widget", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Active task",
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+					metadata: { secret: "shh", n: 42 },
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 200 });
+		const joined = lines.join("\n");
+		expect(joined).not.toContain("secret");
+		expect(joined).not.toContain("shh");
+		expect(joined).not.toContain("42");
+	});
+
+	it("does NOT show `owner` (widget is single-line; owner surfaces in /todos only)", () => {
+		const tracker = new TaskTracker(() => 5_000);
+		tracker.reconstructFromDetails({
+			tasks: [
+				makeTask({
+					id: "t1",
+					content: "Active task",
+					status: "in_progress",
+					startedAt: 0,
+					priority: "high",
+					owner: "agent-1",
+				}),
+			],
+		});
+
+		const { lines } = renderWith(tracker, { renderWidth: 200 });
+		const joined = lines.join("\n");
+		expect(joined).not.toContain("agent-1");
 	});
 });

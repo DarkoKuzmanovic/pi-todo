@@ -109,17 +109,45 @@ describe("TodoStore", () => {
 		});
 	});
 
+	describe("activeTasks excludes tombstones", () => {
+		it("excludes tasks with deletedAt set, even if status is not completed", () => {
+			store.setTasks([
+				makeTask({ id: "t1", status: "pending" }),
+				makeTask({ id: "t2", status: "pending", deletedAt: Date.now() }),
+				makeTask({ id: "t3", status: "in_progress" }),
+			]);
+			expect(store.activeTasks().map((t) => t.id)).toEqual(["t1", "t3"]);
+		});
+
+		it("excludes tombstoned completed tasks", () => {
+			store.setTasks([
+				makeTask({ id: "t1", status: "completed" }),
+				makeTask({ id: "t2", status: "completed", deletedAt: 1 }),
+			]);
+			expect(store.activeTasks()).toHaveLength(0);
+		});
+	});
+
 	describe("removeByIds", () => {
-		it("removes tasks by their IDs", () => {
+		it("soft-deletes tasks by stamping deletedAt and retaining them", () => {
 			store.setTasks([
 				makeTask({ id: "t1" }),
 				makeTask({ id: "t2" }),
 				makeTask({ id: "t3" }),
 			]);
+			const before = Date.now();
 			const removed = store.removeByIds(["t1", "t3"]);
 			expect(removed).toHaveLength(2);
 			expect(removed).toEqual(["t1", "t3"]);
-			expect(store.tasks.map((t) => t.id)).toEqual(["t2"]);
+			// Tasks are retained, not erased.
+			expect(store.tasks).toHaveLength(3);
+			const t1 = store.tasks.find((t) => t.id === "t1");
+			expect(t1?.deletedAt).toBeGreaterThanOrEqual(before);
+			const t3 = store.tasks.find((t) => t.id === "t3");
+			expect(t3?.deletedAt).toBeGreaterThanOrEqual(before);
+			// Unremoved task is untouched.
+			const t2 = store.tasks.find((t) => t.id === "t2");
+			expect(t2?.deletedAt).toBeUndefined();
 		});
 
 		it("returns empty array when no IDs match", () => {
@@ -127,6 +155,7 @@ describe("TodoStore", () => {
 			const removed = store.removeByIds(["nonexistent"]);
 			expect(removed).toEqual([]);
 			expect(store.tasks).toHaveLength(1);
+			expect(store.tasks[0].deletedAt).toBeUndefined();
 		});
 
 		it("handles empty IDs array", () => {
@@ -136,14 +165,27 @@ describe("TodoStore", () => {
 			expect(store.tasks).toHaveLength(1);
 		});
 
-		it("handles duplicate IDs in remove list", () => {
+		it("handles duplicate IDs in remove list (stamps once)", () => {
 			store.setTasks([
 				makeTask({ id: "t1" }),
 				makeTask({ id: "t2" }),
 			]);
 			const removed = store.removeByIds(["t1", "t1"]);
 			expect(removed).toHaveLength(1);
-			expect(store.tasks.map((t) => t.id)).toEqual(["t2"]);
+			expect(removed).toEqual(["t1"]);
+			expect(store.tasks).toHaveLength(2);
+		});
+
+		it("re-removing a tombstoned id is a no-op and not counted", () => {
+			store.setTasks([
+				makeTask({ id: "t1" }),
+				makeTask({ id: "t2" }),
+			]);
+			const first = store.removeByIds(["t1"]);
+			expect(first).toEqual(["t1"]);
+			const second = store.removeByIds(["t1"]);
+			expect(second).toEqual([]);
+			expect(store.tasks).toHaveLength(2);
 		});
 	});
 
@@ -246,7 +288,8 @@ describe("TodoStore", () => {
 			]);
 
 			store.removeByIds(["t2"]);
-			expect(store.tasks.map((t) => t.id)).toEqual(["t1", "t3"]);
+			// Soft-delete retains t2 with deletedAt.
+			expect(store.tasks.map((t) => t.id)).toEqual(["t1", "t2", "t3"]);
 
 			store.setTasks([
 				makeTask({ id: "t1", content: "A" }),

@@ -14,7 +14,7 @@ export class TodoStore {
 	}
 
 	activeTasks(): Task[] {
-		return this.tasks.filter((t) => t.status !== "completed");
+		return this.tasks.filter((t) => t.status !== "completed" && t.deletedAt == null);
 	}
 
 	setTasks(next: Task[]): void {
@@ -33,13 +33,13 @@ export class TodoStore {
 
 	removeByIds(ids: string[]): string[] {
 		const removed: string[] = [];
-		this.tasks = this.tasks.filter((t) => {
-			if (ids.includes(t.id)) {
+		const idSet = new Set(ids);
+		for (const t of this.tasks) {
+			if ((idSet.has(t.id)) && t.deletedAt == null) {
+				t.deletedAt = Date.now();
 				removed.push(t.id);
-				return false;
 			}
-			return true;
-		});
+		}
 		return removed;
 	}
 
@@ -119,7 +119,7 @@ export function updateWidget(ctx: ExtensionContext): void {
 	const th = ctx.ui.theme;
 	const inProg = active.filter((t) => t.status === "in_progress");
 	const pending = active.filter((t) => t.status === "pending");
-	const doneCount = store.tasks.filter((t) => t.status === "completed").length;
+	const doneCount = store.tasks.filter((t) => t.status === "completed" && t.deletedAt == null).length;
 
 	const parts: string[] = [];
 	if (inProg.length > 0) parts.push(th.fg("accent", `\uf111 ${inProg.length} active`));

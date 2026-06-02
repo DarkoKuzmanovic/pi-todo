@@ -1,5 +1,5 @@
 /**
-	 * pi-todo
+ * pi-todo
  *
  * Task management extension that prevents "goal drift" — the tendency for
  * agents to lose track of the original plan as context grows.
@@ -13,7 +13,7 @@
  *
  * Tools:   todo_write   — replace the entire task list (atomic update)
  *          todo_read    — read the current task list
- *          todo_remove  — remove tasks by ID (permanent deletion)
+ *          todo_remove  — remove tasks by ID (soft-delete: tasks are stamped and retained in history)
  * Command: /todos       — open interactive full-screen task viewer
  */
 
@@ -28,11 +28,13 @@ import { TodoRuntime } from "./runtime";
 import { reconstructState, store } from "./state";
 import { createTodoSnapshot, TODO_SNAPSHOT_CUSTOM_TYPE } from "./replay";
 import { formatStrippedWarning, validateDependencyGraph } from "./deps";
+import { coerceRichFields, validateMetadata } from "./rich-fields";
 import type { Task, TaskDetails, TaskPriority, TaskStatus } from "./types";
 
 // ── Runtime ────────────────────────────────────────────────────────────────────
 
-const runtime = new TodoRuntime();
+/** Exported for symmetry tests (M3-T3). */
+export const runtime = new TodoRuntime();
 
 /** Safely read the session branch; may throw before the session is initialised. */
 function getBranchSafe(ctx: { sessionManager: { getBranch(): readonly unknown[] } }): readonly unknown[] {
@@ -64,6 +66,10 @@ export default function todoExtension(pi: ExtensionAPI): void {
 	// Do NOT return `compaction` — that would replace Pi's default summary.
 	pi.on("session_before_compact", (_event, _ctx) => {
 		pi.appendEntry(TODO_SNAPSHOT_CUSTOM_TYPE, createTodoSnapshot({ tasks: [...store.tasks] }));
+		// M3-T3 M-a risk: every snapshot/tool-result carries cumulative tombstones,
+		// so removal-heavy sessions will grow this payload unbounded over long runs.
+		// Hard-purge/pruning is parked for a later milestone; the parked hard-purge
+		// is the planned pressure valve. Do NOT implement pruning in this milestone.
 	});
 
 	// After compaction the branch is trimmed. Reconstruct both the canonical
@@ -101,7 +107,7 @@ export default function todoExtension(pi: ExtensionAPI): void {
 		name: "todo_write",
 		label: "Tasks",
 		description:
-		"Plan complex work by breaking it into structured, trackable tasks. " +
+			"Plan complex work by breaking it into structured, trackable tasks. " +
 			"Provide the COMPLETE updated list — this REPLACES the current list entirely.",
 		promptSnippet:
 			"Create and update a structured task list with statuses (pending / in_progress / completed) and priorities",
@@ -116,12 +122,41 @@ export default function todoExtension(pi: ExtensionAPI): void {
 				"Do not batch completions — mark each task done as soon as it is finished. " +
 				"Completed tasks remain visible in the list; they are never automatically deleted.",
 			"todo_write REPLACES the entire list. Always include ALL tasks (both changed and unchanged) in every call.",
-			"To permanently remove tasks, use todo_remove instead of omitting them from todo_write.",
+			"To remove tasks, use todo_remove instead of omitting them from todo_write; removed tasks are soft-deleted (hidden from the active list but retained in history).",
+			"Optional rich fields (description, owner, metadata, activeForm) can be passed on each task. " +
+				"description and activeForm are user-authored strings; owner is a free-form id; " +
+				"metadata is a flat string|number|boolean bag (no nulls, no nested objects, no arrays). " +
+				"If a task's metadata container itself is malformed (e.g. a string, array, or null), the entire write is rejected with an error. " +
+				"Bad keys inside an otherwise-valid metadata container are dropped per-key with a warning; the write is not aborted.",
 		],
 		parameters: TodoWriteParams,
 
 		async execute(_id, params, _signal, _onUpdate, ctx) {
+			// Snapshot the ID counter so an atomic rejection (e.g. a dependency
+			// cycle) leaves NO trace in canonical state, even though building
+			// candidates below may call store.generateId() for id-less tasks.
+			const savedIdCounter = store.idCounter;
+			// M4 — I1 pre-flight: whole-task rejection when a task's metadata
+			// *container* is malformed (string, array, null, or non-object).
+			// Per-key reject-with-named-warning is handled below for keys inside
+			// an otherwise-valid object. The whole-container rejection is
+			// atomic: the entire write is aborted with the first malformed
+			// container found, no IDs are minted, no tasks are mutated.
+			for (const t of params.tasks) {
+				if (t.metadata === undefined) continue; // absent is fine
+				const preflight = validateMetadata(t.metadata);
+				if (!preflight.ok) {
+					store.idCounter = savedIdCounter;
+					return {
+						content: [{ type: "text", text: preflight.error }],
+						details: { tasks: [...store.tasks] } satisfies TaskDetails,
+					};
+				}
+			}
 			// Build candidate task list preserving any blockedBy metadata the agent sent.
+			// M4 — also coerce rich fields (description, owner, metadata, activeForm)
+			// at this input boundary and aggregate per-key metadata warnings.
+			const richWarnings: string[] = [];
 			const candidates: Task[] = params.tasks.map((t) => {
 				const next: Task = {
 					id: t.id ?? store.generateId(),
@@ -132,6 +167,29 @@ export default function todoExtension(pi: ExtensionAPI): void {
 				if (Array.isArray(t.blockedBy)) {
 					next.blockedBy = [...t.blockedBy];
 				}
+				// M4 — apply I1 input-boundary policy. coerceRichFields does the
+				// type-safe coercion for description/owner/activeForm and the
+				// per-key validation for metadata.
+				const rf = coerceRichFields(
+					next,
+					t.description,
+					t.owner,
+					t.metadata,
+					t.activeForm,
+				);
+				if (rf.description !== undefined) next.description = rf.description;
+				if (rf.owner !== undefined) next.owner = rf.owner;
+				if (rf.activeForm !== undefined) next.activeForm = rf.activeForm;
+				if (rf.metadata !== undefined) next.metadata = rf.metadata;
+				// Per-key drop warnings. Whole-container errors (string, array,
+				// null, non-object) are rejected in the pre-flight loop above;
+				// by the time we reach this branch, validateMetadata MUST be
+				// ok for any t.metadata that exists. The guard is defensive
+				// in case validateMetadata semantics change.
+				const mdCheck = validateMetadata(t.metadata);
+				if (mdCheck.ok && mdCheck.dropped.length > 0) {
+					richWarnings.push(...mdCheck.dropped);
+				}
 				return next;
 			});
 
@@ -141,21 +199,37 @@ export default function todoExtension(pi: ExtensionAPI): void {
 			//   - reject cycles atomically
 			const validation = validateDependencyGraph(candidates);
 			if (!validation.ok) {
+				// Atomic rejection: roll back any IDs generated while building candidates.
+				store.idCounter = savedIdCounter;
 				return {
 					content: [{ type: "text", text: validation.error }],
 					details: { tasks: [...store.tasks] } satisfies TaskDetails,
 				};
 			}
 
-			store.applyStatusTransitions(validation.tasks);
-			store.setTasks(validation.tasks);
+			// B1: preserve stored tombstones whose ids are NOT in the incoming
+			// candidate set. The agent cannot see hidden tombstones, so its
+			// full-replace would erase them — but the audit trail must survive.
+			const candidateIds = new Set(validation.tasks.map((t) => t.id));
+			const preservedTombstones = store.tasks.filter(
+				(t) => t.deletedAt != null && !candidateIds.has(t.id),
+			);
+
+			const finalTasks = [...validation.tasks, ...preservedTombstones];
+			store.applyStatusTransitions(finalTasks);
+			store.setTasks(finalTasks);
 			store.syncIdCounter();
 			const details = { tasks: [...store.tasks] } satisfies TaskDetails;
 			runtime.processToolResult("todo_write", details, ctx);
 
 			const warning = formatStrippedWarning(validation.strippedUnknown);
 			const listText = formatListForLLM();
-			const text = warning ? `${listText}\n\n${warning}` : listText;
+			const richWarningText =
+				richWarnings.length > 0
+					? `Warning: metadata ${richWarnings.length === 1 ? "key" : "keys"} rejected: ${richWarnings.join("; ")}`
+					: "";
+			const tail = [warning, richWarningText].filter(Boolean).join("\n\n");
+			const text = tail ? `${listText}\n\n${tail}` : listText;
 			return {
 				content: [{ type: "text", text }],
 				details,
@@ -208,11 +282,11 @@ export default function todoExtension(pi: ExtensionAPI): void {
 		name: "todo_remove",
 		label: "Tasks",
 		description:
-			"Permanently remove tasks by ID. Use this to clean up tasks that are no longer relevant. " +
+			"Remove tasks by ID (soft-delete: tasks are stamped and retained in history for audit). " +
 			"Completed tasks normally stay in the list for visibility — only remove if truly unwanted.",
 		promptSnippet: "Remove tasks by ID",
 		promptGuidelines: [
-			"Use todo_remove to permanently delete tasks that are no longer needed. " +
+			"Use todo_remove to remove tasks that are no longer needed. " +
 				"Completed tasks remain visible by default — only remove if they clutter the list.",
 		],
 		parameters: TodoRemoveParams,
@@ -224,7 +298,7 @@ export default function todoExtension(pi: ExtensionAPI): void {
 
 			if (removed.length === 0) {
 				return {
-				content: [{ type: "text", text: "No tasks to remove (empty ID list)." }],
+					content: [{ type: "text", text: "No tasks to remove (empty ID list)." }],
 					details,
 				};
 			}
@@ -263,8 +337,9 @@ export default function todoExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify(store.tasks.length === 0 ? "No tasks yet." : formatListForLLM(), "info");
 				return;
 			}
+			const liveTasks = store.tasks.filter((t) => t.deletedAt == null);
 			await ctx.ui.custom<void>((_tui, theme, _kb, done) => {
-				return new TodoViewComponent(store.tasks, theme, () => done());
+				return new TodoViewComponent(liveTasks, theme, () => done());
 			});
 		},
 	});
