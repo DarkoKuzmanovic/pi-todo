@@ -78,6 +78,34 @@ Each task may carry four additional optional fields for richer context, all omit
 When a tombstoned task (removed via `todo_remove`) is re-sent via `todo_write` (resurrection), 
 the new payload's rich fields are authoritative — there is no merge-back from the pre-tombstone 
 audit-retained payload (I2 invariant).
+
+### Manual live-trial checklist
+
+A single `/reload` session running through these six steps confirms the M4 rich fields work
+end-to-end in the live terminal. Mocked tests cover everything below; this is a final
+sanity check that the actual UI surfaces match the M-c visibility map.
+
+1. **Seed a task with all four rich fields** via `todo_write`:
+   ```json
+   {"tasks": [{"content": "Wire M4 into the live session", "status": "in_progress",
+     "activeForm": "wiring M4 into the live session",
+     "description": "Verification step before M5",
+     "owner": "agent-1",
+     "metadata": {"priority": "high", "ticket": "M4"}}]}
+   ```
+2. **Inspect the compact widget** above the editor. Expect to see the active task's `content`
+   followed by ` — <description>`. Expect NO `owner`, NO `activeForm`, NO `metadata` text.
+3. **Run `/todos`**. Expect `description`, `owner`, and `activeForm` to appear next to the task,
+   and `metadata` to be absent.
+4. **Inspect the system prompt block** (e.g. via `before_agent_start` content). Expect the
+   active-task label to read `currently wiring M4 into the live session` (the `activeForm`).
+   Expect NO `description`, NO `owner`, NO `metadata` text.
+5. **Run `/next`** to advance the task. Expect the follow-up message to include
+   `Currently <activeForm>` when the next-up task has one. Run `/start` against a blocked task
+   to confirm the blocked-deps annotation uses live dep IDs only (not tombstoned ones).
+6. **Trigger a `/compact`** to exercise the M1 replay path. After compaction, re-inspect the
+   compact widget, `/todos`, and the system prompt block. Expect the rich fields to survive
+   intact and the visibility map to remain correct.
 ## Task statuses
 
 | Status | Icon | Meaning |

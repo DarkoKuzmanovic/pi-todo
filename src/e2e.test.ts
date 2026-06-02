@@ -1715,3 +1715,91 @@ describe("M4 I1 fix-back: malformed metadata container is whole-task rejected", 
 		expect(todoStore.tasks[0].metadata).toEqual({ s: "x", n: 42, b: true });
 	});
 });
+
+describe("M4 reviewer amendment: todo_read exposes rich fields in details, hides metadata in text", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		mockPi = buildMockPi();
+		todoExtension(mockPi.pi);
+	});
+
+	it("todo_read returns all four rich fields in details and hides metadata in content", async () => {
+		// Seed a task with every rich field via todo_write
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					{
+						content: "Rich task",
+						status: "in_progress",
+						priority: "high",
+						description: "long reference notes",
+						owner: "agent-1",
+						activeForm: "doing rich stuff",
+						metadata: { ticket: "M4-1", priority: 2 },
+					},
+				],
+			},
+			ctx,
+		);
+
+		// Call todo_read directly
+		const readTool = mockPi.tools.get("todo_read");
+		expect(readTool).toBeDefined();
+		const readResult = await readTool!.execute({} as Record<string, never>, ctx);
+
+		// Content (LLM text via formatListForLLM, the /todos non-UI path)
+		// follows M-c visibility: description/activeForm/owner are surfaced
+		// for the /todos interaction; metadata is hidden. The system prompt
+		// block (buildSystemPromptBlock) is a different path and is
+		// exercised by separate tests in src/symmetry.test.ts.
+		const text = readResult.content[0]?.text ?? "";
+		expect(text).toContain("Rich task");
+		expect(text).toContain("long reference notes"); // description IS in /todos text
+		expect(text).toContain("agent-1"); // owner IS in /todos text
+		expect(text).toContain("doing rich stuff"); // activeForm IS in /todos text
+		expect(text).not.toContain("M4-1"); // metadata NOT in /todos text
+
+		// Details carry every rich field verbatim (canonical state).
+		const details = readResult.details as { tasks: Task[] };
+		expect(details.tasks).toHaveLength(1);
+		const t = details.tasks[0];
+		expect(t.description).toBe("long reference notes");
+		expect(t.owner).toBe("agent-1");
+		expect(t.activeForm).toBe("doing rich stuff");
+		expect(t.metadata).toEqual({ ticket: "M4-1", priority: 2 });
+	});
+
+	it("todo_read of a task without rich fields returns undefined for each rich field, never throws", async () => {
+		// Seed a legacy task (no rich fields) via todo_write
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					{
+						content: "Legacy task",
+						status: "pending",
+						priority: "medium",
+					},
+				],
+			},
+			ctx,
+		);
+
+		const readTool = mockPi.tools.get("todo_read");
+		expect(readTool).toBeDefined();
+		const readResult = await readTool!.execute({} as Record<string, never>, ctx);
+
+		const details = readResult.details as { tasks: Task[] };
+		expect(details.tasks).toHaveLength(1);
+		const t = details.tasks[0];
+		// Backward compatibility: rich fields are undefined, not missing keys.
+		expect(t.description).toBeUndefined();
+		expect(t.owner).toBeUndefined();
+		expect(t.activeForm).toBeUndefined();
+		expect(t.metadata).toBeUndefined();
+	});
+});

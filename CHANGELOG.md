@@ -40,7 +40,7 @@
 - Session loading no longer throws: `getBranchSafe()` wraps `ctx.sessionManager.getBranch()` in try/catch (returns `[]`) so `session_start` and `session_tree` recover gracefully when the branch is read before the session is initialised.
 
 ### Notes
-- Standalone `oh-my-todo` has been disabled by clearing its package `pi.extensions` list; reload Pi and trial normal todo workflows before archiving or deleting the folder.
+- Standalone `oh-my-todo` has been fully removed (2026-06-02, M5 fast-track): the folder at `../oh-my-todo/` was deleted via recoverable move + targeted `find -delete`. Its `pi.extensions` had been `[]` since M0 so the live Pi session never loaded it; the deletion was cleanup-only with no behavior change.
 
 ## [0.8.2] - 2026-05-11
 
