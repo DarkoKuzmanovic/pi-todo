@@ -32,6 +32,7 @@
 
 ### Changed
 - `pi-todo` now owns the compact widget under the `pi-todo-compact` key while preserving the existing `todo_write`, `todo_read`, and `todo_remove` tool names and schemas.
+- Compact widget all-done state now uses a restrained QED-style status (`∎ completed/total — done`) instead of the previous mirrored celebration banner.
 - Slash helper commands send auditable follow-up instructions through `todo_write` instead of mutating task state directly.
 - `todo_remove` is now soft-delete (was permanent). Tombstoned tasks are retained in canonical state with a `deletedAt` timestamp, hidden from all normal surfaces, and preserved through `todo_write` full-list replacement and compaction/replay.
 - Dependency validation now operates over live candidates only; preserved tombstones are merged after validation. A `blockedBy` reference to a tombstoned dependency no longer blocks the dependent and is stripped from the blocker label display.

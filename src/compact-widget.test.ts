@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
 	COMPACT_WIDGET_KEY,
 	updateCompactWidget,
@@ -153,7 +153,7 @@ describe("updateCompactWidget — render states", () => {
 		expect(lines[0]).toContain("\ue370"); // pencil glyph
 	});
 
-	it("renders the all-done celebration banner when every task is completed", () => {
+	it("renders the all-done QED status when every task is completed", () => {
 		const clock = () => 1000;
 		const tracker = new TaskTracker(clock);
 		tracker.reconstructFromDetails({
@@ -166,8 +166,8 @@ describe("updateCompactWidget — render states", () => {
 		const { lines } = renderWith(tracker, { renderWidth: 80 });
 		const joined = lines.join("\n");
 
-		expect(joined).toContain("\uf527"); // celebration glyph
-		expect(joined).toContain("2/2");
+		expect(joined).toContain("∎ 2/2 — done");
+		expect(joined).not.toContain("All done!");
 	});
 
 	it("renders the active task content and elapsed time", () => {

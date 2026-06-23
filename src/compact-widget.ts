@@ -143,10 +143,10 @@ function buildRenderable(
 				return [truncateToColumns(msg, width)];
 			}
 
-			// All-done state: celebration banner.
+			// All-done state: compact QED status.
 			if (completed === total) {
-				const celebration = tf("success", `\uf527 All done!  ${completed}/${total} \uf527 `);
-				return [truncateToColumns(celebration, width)];
+				const completionStatus = tf("success", `∎ ${completed}/${total} — done`);
+				return [truncateToColumns(completionStatus, width)];
 			}
 
 		let left = "";
