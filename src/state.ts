@@ -122,9 +122,9 @@ export function updateWidget(ctx: ExtensionContext): void {
 	const doneCount = store.tasks.filter((t) => t.status === "completed" && t.deletedAt == null).length;
 
 	const parts: string[] = [];
-	if (inProg.length > 0) parts.push(th.fg("accent", `\uf111 ${inProg.length} active`));
-	if (pending.length > 0) parts.push(th.fg("muted", `\uf4aa ${pending.length} pending`));
-	if (doneCount > 0) parts.push(th.fg("success", `\uf00c ${doneCount} done`));
+	if (inProg.length > 0) parts.push(`\uf111 ${th.fg("accent", String(inProg.length))}`);
+	if (pending.length > 0) parts.push(`\uf4aa ${th.fg("muted", String(pending.length))}`);
+	if (doneCount > 0) parts.push(`\uf00c ${th.fg("success", String(doneCount))}`);
 	ctx.ui.setStatus("pi-todo", parts.join("  "));
 }
 

@@ -643,8 +643,8 @@ describe("M1-T4 end-to-end: post-compaction reconstructed state", () => {
 			const keys = widgetCalls.map((w) => w.key);
 			// pi-todo-compact is always set as a widget when UI is available
 			expect(keys).toContain("pi-todo-compact");
-			// Active in-progress task should set the legacy status to "1 active"
-			expect(statusCalls).toContainEqual({ key: "pi-todo", text: "\uf111 1 active" });
+			// Active in-progress task should set the compact legacy status.
+			expect(statusCalls).toContainEqual({ key: "pi-todo", text: "\uf111 1" });
 			const compactOutput = renderCompactWidget(widgetCalls).join("\n");
 			expect(compactOutput).toContain("Active work");
 		});

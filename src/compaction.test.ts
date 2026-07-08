@@ -219,7 +219,7 @@ describe("compaction lifecycle: session_compact", () => {
 		const handler = mockPi.handlers.get("session_compact")!;
 		await handler({} as unknown, ctx);
 
-		expect(statusCalls).toContainEqual({ key: "pi-todo", text: "\uf111 1 active" });
+		expect(statusCalls).toContainEqual({ key: "pi-todo", text: "\uf111 1" });
 		const compactCalls = widgetCalls.filter((w) => w.key === COMPACT_WIDGET_KEY);
 		expect(compactCalls).toHaveLength(1);
 	});
