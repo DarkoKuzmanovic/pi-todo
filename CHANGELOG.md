@@ -2,13 +2,10 @@
 
 ## [Unreleased]
 
-### Fixed
-- Prompt cache: the live plan block is no longer appended to the **system prompt**. Injecting per-turn-changing todo state into the cached prefix invalidated the Anthropic system block and every message after it on each todo transition (a large cache write per `todo_write`/status change). The block is now delivered as an ephemeral trailing `custom` message via the `context` hook (maps to an LLM user message, `<system-reminder>`-framed, not persisted), keeping the multi-thousand-token system prefix a cache read while only the small tail re-processes. Static todo tool guidance stays in the system prompt. `before_agent_start` no longer mutates the system prompt; `e2e.test.ts` prompt-injection coverage now drives the `context` hook.
-
 ### Added
 - M4 — Optional rich task fields: `description`, `owner`, `activeForm`, `metadata` on tasks.
   - **description** — long-form notes, surfaces in `/todos` and compact widget only (not in prompt).
-  - **activeForm** — short present-progressive label, used as the active-task label in the live plan reminder (I3 delimiter-safe) and in `/todos`.
+  - **activeForm** — short present-progressive label, used as the active-task label in the system prompt (I3 delimiter-safe) and in `/todos`.
   - **owner** — free-form agent/user attribution, surfaces in `/todos` only.
   - **metadata** — flat `Record<string, string | number | boolean>` key-value bag. **Hidden on every surface**; canonical state + replay only. Per-key reject-with-named-warning (I1). B1 type-preserving passthrough ensures replay fidelity.
   - M-c visibility map: `activeForm` is the only rich field exposed to the prompt. `description` and `owner` surface in `/todos` and tool results. `metadata` hidden everywhere.

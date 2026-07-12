@@ -21,7 +21,7 @@ import type { CustomToolResultEvent, ExtensionAPI } from "@earendil-works/pi-cod
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { TodoViewComponent } from "./component";
-import { buildTodoReminderText, formatListForLLM } from "./prompt";
+import { buildSystemPromptBlock, formatListForLLM } from "./prompt";
 import { TodoRemoveParams, TodoWriteParams } from "./schemas";
 import { registerTodoCommands } from "./commands";
 import { TodoRuntime } from "./runtime";
@@ -81,29 +81,11 @@ export default function todoExtension(pi: ExtensionAPI): void {
 		runtime.reconstructFromSession(getBranchSafe(ctx), ctx);
 	});
 
-	// ── Live plan injection (cache-safe) ───────────────────────────────────
-	// Inject the volatile task block as an ephemeral trailing message rather
-	// than into the system prompt. The system prompt is part of the Anthropic
-	// cached prefix; injecting per-turn-changing todo state there invalidated
-	// the system block AND every message after it on each todo transition (a
-	// large cache write per update). A trailing `custom` message maps to an LLM
-	// user message via convertToLlm, lands after the cached prefix, and is not
-	// persisted to the session — so only the small tail re-processes.
-	pi.on("context", async (event, _ctx) => {
-		const text = buildTodoReminderText();
-		if (!text) return;
-		return {
-			messages: [
-				...event.messages,
-				{
-					role: "custom",
-					customType: "todo-plan-reminder",
-					content: text,
-					display: false,
-					timestamp: Date.now(),
-				},
-			],
-		};
+	// ── System-prompt injection ────────────────────────────────────────────
+	pi.on("before_agent_start", async (event, _ctx) => {
+		const block = buildSystemPromptBlock();
+		if (!block) return;
+		return { systemPrompt: `${event.systemPrompt}\n\n${block}` };
 	});
 
 	// ── Post-turn widget refresh ───────────────────────────────────────────

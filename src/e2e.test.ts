@@ -5,7 +5,7 @@
  * user-facing surface that consumes todo state:
  *   - /done, /start, /next, /pause (read runtime.tracker)
  *   - /todos (reads store.tasks, both UI and non-UI paths)
- *   - context hook (reads store.tasks via buildTodoReminderText)
+ *   - before_agent_start (reads store.tasks via buildSystemPromptBlock)
  *   - widget refreshes (pi-todo + pi-todo-compact)
  *
  * Strategy: a rich mock ExtensionAPI captures registered event handlers,
@@ -205,39 +205,6 @@ async function triggerSessionCompact(mockPi: MockPi, branch: readonly unknown[])
 	if (!handler) throw new Error("session_compact handler not registered");
 	const { ctx } = buildCtx(branch, false);
 	await handler({}, ctx);
-}
-
-// ── Context-hook (live plan reminder) helpers ─────────────────────────
-// The live plan block is injected as an ephemeral trailing `custom` message via
-// the `context` hook (cache-safe), not into the system prompt. These helpers
-// drive that handler and extract the injected reminder text.
-
-interface ContextInjectionMessage {
-	role?: string;
-	content?: unknown;
-}
-
-interface ContextInjectionResult {
-	messages?: ContextInjectionMessage[];
-}
-
-async function runContextInjection(
-	mockPi: MockPi,
-	ctx: ExtensionContext,
-	baseMessages: ContextInjectionMessage[] = [],
-): Promise<ContextInjectionResult | undefined> {
-	const handler = mockPi.handlers.get("context");
-	if (!handler) throw new Error("context handler not registered");
-	return (await handler({ messages: baseMessages }, ctx)) as
-		| ContextInjectionResult
-		| undefined;
-}
-
-function injectedReminderText(result: ContextInjectionResult | undefined): string {
-	const messages = result?.messages;
-	if (!messages || messages.length === 0) return "";
-	const last = messages[messages.length - 1];
-	return typeof last.content === "string" ? last.content : "";
 }
 
 function cloneStoreTasks(): Task[] {
@@ -597,8 +564,9 @@ describe("M1-T4 end-to-end: post-compaction reconstructed state", () => {
 		});
 	});
 
-	// ── Live plan reminder (context hook) ───────────────────────────────
-	describe("context injection after compaction", () => {
+	// ── before_agent_start ──────────────────────────────────────────────
+
+	describe("before_agent_start after compaction", () => {
 		it("injects the plan block from reconstructed active tasks", async () => {
 			const tasks = [
 				makeTask({ id: "t1", content: "Write design", status: "in_progress", priority: "high" }),
@@ -607,13 +575,17 @@ describe("M1-T4 end-to-end: post-compaction reconstructed state", () => {
 			];
 			await triggerSessionCompact(mockPi, snapshotBranch(tasks));
 
-			// Base messages the hook must preserve, with the reminder appended after them.
-			const base = [{ role: "user", content: "BASE" }];
-			const result = await runContextInjection(mockPi, buildCtx([], false).ctx, base);
+			const handler = mockPi.handlers.get("before_agent_start");
+			if (!handler) throw new Error("before_agent_start handler not registered");
+
+			const result = (await handler(
+				{ systemPrompt: "BASE" },
+				buildCtx([], false).ctx,
+			)) as { systemPrompt: string } | undefined;
 
 			expect(result).toBeDefined();
-			expect(result?.messages?.[0]).toEqual({ role: "user", content: "BASE" });
-			const injected = injectedReminderText(result);
+			expect(result?.systemPrompt.startsWith("BASE")).toBe(true);
+			const injected = result?.systemPrompt ?? "";
 			expect(injected).toContain("## Your Plan");
 			expect(injected).toContain("Write design");
 			expect(injected).toContain("Implement");
@@ -628,7 +600,13 @@ describe("M1-T4 end-to-end: post-compaction reconstructed state", () => {
 			];
 			await triggerSessionCompact(mockPi, snapshotBranch(tasks));
 
-			const result = await runContextInjection(mockPi, buildCtx([], false).ctx);
+			const handler = mockPi.handlers.get("before_agent_start");
+			if (!handler) throw new Error("before_agent_start handler not registered");
+
+			const result = await handler(
+				{ systemPrompt: "BASE" },
+				buildCtx([], false).ctx,
+			);
 
 			expect(result).toBeUndefined();
 		});
@@ -636,7 +614,13 @@ describe("M1-T4 end-to-end: post-compaction reconstructed state", () => {
 		it("omits the plan block when reconstructed list is empty", async () => {
 			await triggerSessionCompact(mockPi, snapshotBranch([]));
 
-			const result = await runContextInjection(mockPi, buildCtx([], false).ctx);
+			const handler = mockPi.handlers.get("before_agent_start");
+			if (!handler) throw new Error("before_agent_start handler not registered");
+
+			const result = await handler(
+				{ systemPrompt: "BASE" },
+				buildCtx([], false).ctx,
+			);
 
 			expect(result).toBeUndefined();
 		});
@@ -886,8 +870,12 @@ describe("M2-T4 end-to-end: blockedBy across todo_write, replay, compaction, pro
 		]);
 		await triggerSessionCompact(mockPi, branch);
 
-		const result = await runContextInjection(mockPi, buildCtx(branch, false).ctx);
-		const prompt = injectedReminderText(result);
+		const beforeAgent = mockPi.handlers.get("before_agent_start");
+		if (!beforeAgent) throw new Error("before_agent_start not registered");
+		const result = (await beforeAgent({}, buildCtx(branch, false).ctx)) as
+			| { systemPrompt?: string }
+			| undefined;
+		const prompt = result?.systemPrompt ?? "";
 		expect(prompt).toContain("## Your Plan");
 		// Unblocked t1 stays in the main plan section.
 		expect(prompt).toContain("Blocker");
@@ -931,8 +919,12 @@ describe("M2-T4 end-to-end: blockedBy across todo_write, replay, compaction, pro
 		// isn't directly observable from this surface. Assert via the
 		// prompt injection surface, which is the related observable
 		// confirming the blocked state is reflected post-reconstruction.
-		const r = await runContextInjection(mockPi, buildCtx(branch, false).ctx);
-		const prompt = injectedReminderText(r);
+		const beforeAgent = mockPi.handlers.get("before_agent_start");
+		if (!beforeAgent) throw new Error("before_agent_start not registered");
+		const r = (await beforeAgent({}, buildCtx(branch, false).ctx)) as
+			| { systemPrompt?: string }
+			| undefined;
+		const prompt = r?.systemPrompt ?? "";
 		expect(prompt).toContain("Blocked (waiting on dependencies):");
 		expect(prompt).toContain("[Blocked] [Medium] Blocked A");
 		expect(prompt).toContain("[Blocked] [Medium] Blocked B");
@@ -947,8 +939,12 @@ describe("M2-T4 end-to-end: blockedBy across todo_write, replay, compaction, pro
 		await triggerSessionCompact(mockPi, branch);
 
 		// t2 should currently be blocked: prompt listing should include (blocked by: t1).
-		const r1 = await runContextInjection(mockPi, buildCtx(branch, false).ctx);
-		expect(injectedReminderText(r1)).toContain("Blocked (waiting on dependencies):");
+		const beforeAgent1 = mockPi.handlers.get("before_agent_start");
+		if (!beforeAgent1) throw new Error("before_agent_start not registered");
+		const r1 = (await beforeAgent1({}, buildCtx(branch, false).ctx)) as
+			| { systemPrompt?: string }
+			| undefined;
+		expect(r1?.systemPrompt ?? "").toContain("Blocked (waiting on dependencies):");
 
 		// Mark t1 completed via the tool result path. The mock doesn't expose
 		// tool_result handlers for the todo tools, so we drive the
@@ -959,8 +955,10 @@ describe("M2-T4 end-to-end: blockedBy across todo_write, replay, compaction, pro
 		]);
 		await triggerSessionCompact(mockPi, branch2);
 
-		const r2 = await runContextInjection(mockPi, buildCtx(branch2, false).ctx);
-		const prompt2 = injectedReminderText(r2);
+		const r2 = (await beforeAgent1({}, buildCtx(branch2, false).ctx)) as
+			| { systemPrompt?: string }
+			| undefined;
+		const prompt2 = r2?.systemPrompt ?? "";
 		// t2 is now unblocked; no Blocked section needed.
 		expect(prompt2).not.toContain("Blocked (waiting on dependencies):");
 		// t2 should appear in the main plan section.
@@ -1147,8 +1145,10 @@ describe("M3-T4: tombstone e2e lifecycle — hidden everywhere, retained in hist
 
 		// ── (a) HIDDEN: buildSystemPromptBlock ────────────────────────
 		const { ctx: ctxBefore } = buildCtx([], false);
-		const result = await runContextInjection(mockPi, ctxBefore);
-		const prompt = injectedReminderText(result);
+		const beforeHandler = mockPi.handlers.get("before_agent_start");
+		expect(beforeHandler).toBeDefined();
+		const result = (await beforeHandler!({}, ctxBefore)) as { systemPrompt?: string } | undefined;
+		const prompt = result?.systemPrompt ?? "";
 		expect(prompt).toContain("Keep me");
 		expect(prompt).not.toContain("Remove me"); // tombstone hidden
 
@@ -1282,8 +1282,10 @@ describe("M3-T4: tombstone e2e lifecycle — hidden everywhere, retained in hist
 
 		// After compaction, tombstone is STILL hidden from prompt
 		const { ctx: ctxAfterComp } = buildCtx([], false);
-		const afterResult = await runContextInjection(mockPi, ctxAfterComp);
-		const promptAfter = injectedReminderText(afterResult);
+		const afterBeforeHandler = mockPi.handlers.get("before_agent_start");
+		expect(afterBeforeHandler).toBeDefined();
+		const afterResult = (await afterBeforeHandler!({}, ctxAfterComp)) as { systemPrompt?: string } | undefined;
+		const promptAfter = afterResult?.systemPrompt ?? "";
 		expect(promptAfter).toContain("Keep me");
 		expect(promptAfter).not.toContain("Remove me");
 	});
@@ -1333,8 +1335,10 @@ describe("M3-T4: blockedBy × tombstone e2e", () => {
 		mockPi.handlers.clear();
 		await todoExtension(mockPi.pi);
 		const { ctx: ctxBefore } = buildCtx([], false);
-		const beforeResult = await runContextInjection(mockPi, ctxBefore);
-		const prompt = injectedReminderText(beforeResult);
+		const beforeHandler = mockPi.handlers.get("before_agent_start");
+		expect(beforeHandler).toBeDefined();
+		const beforeResult = (await beforeHandler!({}, ctxBefore)) as { systemPrompt?: string } | undefined;
+		const prompt = beforeResult?.systemPrompt ?? "";
 		expect(prompt).toContain("Blocked task"); // t3 in blocked section
 		expect(prompt).not.toContain("Dead blocker"); // t2 hidden
 		expect(prompt).toContain("Live blocker"); // t1 is still live
