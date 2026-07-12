@@ -112,6 +112,28 @@ export function buildSystemPromptBlock(): string {
 	return lines.join("\n");
 }
 
+// ── Cache-safe live-plan reminder ───────────────────────────────────────────
+
+/**
+ * Wrap the live plan block in a `<system-reminder>` for injection as an
+ * ephemeral trailing message (see the `context` hook in index.ts).
+ *
+ * Why not the system prompt: the block mutates on nearly every todo transition
+ * (in_progress task, activeForm label, pending/blocked partition, completed
+ * counter). On Anthropic prompt caching the system prompt is part of the cached
+ * prefix, so injecting volatile state there invalidated the system block AND
+ * every message after it on each change — a large cache write per todo update.
+ * Delivering the block as a trailing message keeps the system prefix a cache
+ * read; only the small tail re-processes.
+ *
+ * Returns "" when there are no active tasks (the caller then injects nothing).
+ */
+export function buildTodoReminderText(): string {
+	const block = buildSystemPromptBlock();
+	if (!block) return "";
+	return `<system-reminder>\nThe following is your current task plan (live state from the todo tool), not a new user message \u2014 do not reply to it directly. Keep following the plan and update it with todo_write as work progresses.\n\n${block}\n</system-reminder>`;
+}
+
 // ── LLM text formatter ─────────────────────────────────────────────────────────
 
 export function formatListForLLM(): string {
