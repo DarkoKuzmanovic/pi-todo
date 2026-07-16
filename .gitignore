@@ -8,6 +8,6 @@ node_modules/
 .DS_Store
 *.log
 
-# Local PMTI working memory (decisions, roadmap, milestones, task packets,
-# session logs, .pi/tmp/ reports) — not part of the public extension.
+# Local scratch working memory (any planning-system temp files) — historical
+# planning state is archived under docs/archive/ instead.
 .pi/

@@ -1,50 +1,22 @@
 # Agent Instructions
 
-<!-- BEGIN PMTI MANAGED BLOCK -->
-## PMTI project state
+## Crew convention
 
-Canonical PMTI state lives in `.pi/pmti/`.
+This project follows the canonical Pi crew convention. See `~/.pi/agent/skills/crew/CONVENTIONS.md` for the full contract. Quick reference:
 
-- Project context: `.pi/pmti/project/`
-- Roadmap: `.pi/pmti/project/roadmap.md`
-- Milestones: `.pi/pmti/milestones/MN.md`
-- Task packets: `.pi/pmti/tasks/<mn-tn-slug>/` (scratch by default)
-- Workspace strategy: `ask-per-milestone`; see `.pi/pmti/project/decisions.md`.
+- **Strategic:** `ROADMAP.md` — strategic `M<n>` milestones. `## Released` past work, `## Planned` future work, `## Current` only while an active build is in flight.
+- **Tactical:** `PLAN.md` — gated outcome slices for an *active build*. Created on demand; absent means no current build. Do not create an empty file just to satisfy the convention — its existence is the signal.
+- **Durable:** `DECISIONS.md` — append-only design forks, never edited retroactively.
+- **Parking lot:** `IDEAS.md` — captured ideas; promote to `ROADMAP.md ## Planned` when ready to ship.
+- **Archive:** `docs/archive/` — historical state from older planning systems (e.g. `docs/archive/pmti/` for PMTI-era state preserved verbatim through the 2026-07-16 migration).
 
-### Session orientation
+Status is derived from `ROADMAP.md` + `DECISIONS.md`; never stored in `status.json` or per-milestone progress files. **M-numbering preserves the PMTI-era scheme** (`M0`–`M5` Released, `M6`–`M10` Planned) so commit messages and the lessons below stay correctly indexed.
 
-1. Read `.pi/pmti/project/roadmap.md`.
-2. Read the current milestone file under `.pi/pmti/milestones/`.
-3. Read the most recent `.pi/pmti/project/session-log/` entry.
-4. If a milestone was just closed, verify reviewer verdict and full tests before starting the next one.
-
-### PMTI routing
-
-- Fresh project setup or repair → `pmti-project`.
-- Milestone planning/decomposition → `pmti-milestone`.
-- Executor-ready task packet → `pmti-task`.
-- Trivial direct edits bypass PMTI.
-- If `.pi/project/` exists without `.pi/pmti/`, this is legacy state; do not mix PMTI files in automatically.
-
-### Mandatory PMTI preflight
-
-Before PMTI writes, delegation, or handoff, classify: CWD, project state, intent, whether PMTI writes are allowed, and the next required action. Use `ask_user` when scope, migration permission, executor choice, or overwrite behavior is ambiguous. Use `todo_write` for non-trivial PMTI work.
-
-### Milestone close-out
-
-A milestone is not done until:
-
-1. Documentation hygiene is checked.
-2. Implementation is committed as a checkpoint where git is available; if no local git repo exists, record the recovery/checkpoint strategy in the session log.
-3. `reviewer` reviews the committed diff unless the documented low-risk skip clause applies.
-4. Blocker findings are fixed before the next milestone.
-5. Full tests are rerun after fixes.
-6. Final reviewer verdict and test result are recorded in `.pi/pmti/project/session-log/`.
-
-Oracle is pre-code advisory. Reviewer is post-code. Executor fixes blockers. Automated fix-back is bounded to two rounds before human/orchestrator escalation.
-<!-- END PMTI MANAGED BLOCK -->
+The PMTI-managed block that previously lived here (`BEGIN/END PMTI MANAGED BLOCK`) was retired on 2026-07-16. Historical PMTI state is at `docs/archive/pmti/`.
 
 ## Lessons learned
+
+*(preserved verbatim from the 2026-07-16 AGENTS.md — the M-references here only stay valid because we kept PMTI M-numbering)*
 
 ### Keep live compaction verification as a separate close-out gate
 
