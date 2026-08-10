@@ -26,6 +26,7 @@ Cherry-picks drawn from a 2026-06-02 comparison sweep of `@juicesharp/rpiv-todo`
 - **M8** — **Settable `blocked` status alongside derived.** Tasks may explicitly carry a settable `blocked` flag for external blockers (CI, user input, PR review), distinct from the M2 graph-derived blocking. *(pix-todo)*
 - **M9** — **Subagent streaming.** Implement the event contract locally — bus events + auto-remove-on-complete columns for sub-tasks — without adopting the `pi-archimedes` meta package. *(pi-archimedes, internalized)*
 - **M10** — **Config file + LLM-guidance snippet.** `~/.config/pi-todo/config.json` with `maxWidgetLines`, `collapseKey`, plus an optional `llmGuidance` snippet injected into the prompt block for user-tunable nudges. *(rpiv-todo)*
+- **Argument completions for `/done` and `/start`** — complete live task ids from the tracker via `getArgumentCompletions`, using each task's text as the item description so ids are never typed from memory; add a round-trip test asserting every suggestion the completer offers is accepted by the parser. *(not part of the cherry-pick sweep above)*
 
 ## Parking lot
 
