@@ -2,7 +2,7 @@
 
 This roadmap stays high-level. Detailed scope, task decomposition, dependencies, and review state for an active build live in `PLAN.md`.
 
-> **M-numbering.** This project preserves the PMTI-era M-numbering (`M0`–`M5` Released) so commit messages and `AGENTS.md ## Lessons learned` stay correctly indexed. Planned milestones continue the same sequence (`M6`–`M10`). When a milestone graduates to a git commit, the commit message keeps the `M<n>` slug and the new code lands with the M-number as a breadcrumb in the relevant module.
+> **M-numbering.** This project preserves the PMTI-era M-numbering (`M0`–`M5` Released) so commit messages and `AGENTS.md ## Lessons learned` stay correctly indexed. Planned milestones continue the same sequence (`M6`–`M11`). When a milestone graduates to a git commit, the commit message keeps the `M<n>` slug and the new code lands with the M-number as a breadcrumb in the relevant module.
 
 ## Released
 
@@ -25,7 +25,8 @@ Cherry-picks drawn from a 2026-06-02 comparison sweep of `@juicesharp/rpiv-todo`
 - **M7** — **Disk fallback.** `~/.pi/xtodo/<safe-session-id>.json` keyed by cleaned session id. Branch replay stays primary (D7); disk is the fallback for branches pruned before the snapshot was appended. *(pi-xtodo)*
 - **M8** — **Settable `blocked` status alongside derived.** Tasks may explicitly carry a settable `blocked` flag for external blockers (CI, user input, PR review), distinct from the M2 graph-derived blocking. *(pix-todo)*
 - **M9** — **Subagent streaming.** Implement the event contract locally — bus events + auto-remove-on-complete columns for sub-tasks — without adopting the `pi-archimedes` meta package. *(pi-archimedes, internalized)*
-- **M10** — **Config file + LLM-guidance snippet.** `~/.config/pi-todo/config.json` with `maxWidgetLines`, `collapseKey`, plus an optional `llmGuidance` snippet injected into the prompt block for user-tunable nudges. *(rpiv-todo)*
+- **M10** — **Config file + LLM-guidance snippet.** `~/.config/pi-todo/config.json` with `maxWidgetLines`, `collapseKey`, plus an optional `llmGuidance` snippet injected into the prompt block for user-tunable nudges. *(rpiv-todo; when this starts, fold in the 2026-08-13 pi-tasks survey findings: `maxVisible`, completed-drop-first collapse, `hiddenAt`)*
+- **M11** — **Delta ops: `todo_patch`.** Targeted mutation of existing tasks by ID (status/priority/content/blockedBy/rich fields, `appendDescription`, per-key metadata merge with `null`-deletes) without resending the list; desugars into the shared `todo_write` commit tail; terse delta result content. Spec: [`docs/specs/2026-08-14-m11-todo-patch.md`](./docs/specs/2026-08-14-m11-todo-patch.md). *(motivated by the 2026-08-13 ecosystem sweep — Claude Code's TodoWrite → TaskCreate/TaskUpdate migration and pi-todo-lite's batch-complete failure-mode notes)*
 - **Argument completions for `/done` and `/start`** — complete live task ids from the tracker via `getArgumentCompletions`, using each task's text as the item description so ids are never typed from memory; add a round-trip test asserting every suggestion the completer offers is accepted by the parser. *(not part of the cherry-pick sweep above)*
 
 ## Parking lot
