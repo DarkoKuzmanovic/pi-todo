@@ -21,6 +21,13 @@ Sourced from the 2026-06-02 comparison sweep of `@juicesharp/rpiv-todo`, `@first
 - `/start <next>` shorthand for `/next && /start` — defer.
 - Merge-back for `activeForm` on resurrection — track as a future D-amendment, not the default. Currently the new payload is authoritative; see `DECISIONS.md ## D3 ## Resurrection`.
 
+## Parked milestones (2026-08-14 roadmap trim)
+
+Parked from `ROADMAP.md ## Planned`; rationale in `DECISIONS.md ## D8`.
+
+- **M7 — Disk fallback** (`~/.pi/xtodo/<safe-session-id>.json`) — 2026-08-14 — no recorded incident of a branch pruned before its snapshot; revive only after an actual loss is observed (D7 stays the rule).
+- **M8 — Settable `blocked` flag for external blockers** — 2026-08-14 — models rarely maintain intermediate statuses (pi-todo-lite lesson); revive on concrete need post-M11 as a `todo_patch`-settable additive flag.
+
 ## How to add an idea
 
 One bullet, one line, one date. Long-form proposals belong in a milestone plan, not here.

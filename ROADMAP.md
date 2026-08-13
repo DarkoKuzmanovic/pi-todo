@@ -2,7 +2,7 @@
 
 This roadmap stays high-level. Detailed scope, task decomposition, dependencies, and review state for an active build live in `PLAN.md`.
 
-> **M-numbering.** This project preserves the PMTI-era M-numbering (`M0`–`M5` Released) so commit messages and `AGENTS.md ## Lessons learned` stay correctly indexed. Planned milestones continue the same sequence (`M6`–`M11`). When a milestone graduates to a git commit, the commit message keeps the `M<n>` slug and the new code lands with the M-number as a breadcrumb in the relevant module.
+> **M-numbering.** This project preserves the PMTI-era M-numbering (`M0`–`M5` Released) so commit messages and `AGENTS.md ## Lessons learned` stay correctly indexed. Planned milestones continue the same sequence (`M6`–`M11`); numbers are never reused, so parked (`M7`, `M8`) and dropped (`M9`) milestones keep their slugs. When a milestone graduates to a git commit, the commit message keeps the `M<n>` slug and the new code lands with the M-number as a breadcrumb in the relevant module.
 
 ## Released
 
@@ -21,13 +21,16 @@ This roadmap stays high-level. Detailed scope, task decomposition, dependencies,
 
 Cherry-picks drawn from a 2026-06-02 comparison sweep of `@juicesharp/rpiv-todo`, `@firstpick/pi-extension-todo-progress`, `@xaccefy/pi-xtodo`, `@pi-archimedes/todo`, `@xynogen/pix-todo`. Implementation order may shift; milestones graduate to `## Released` when shipped.
 
-- **M6** — **Goal anchor.** Mandatory `Goal:` line on the task list; rendered pinned in the compact widget; re-injected on `before_agent_start` so every turn re-anchors to the session objective. *(highest leverage on goal-drift; firstpick-adjacent)*
-- **M7** — **Disk fallback.** `~/.pi/xtodo/<safe-session-id>.json` keyed by cleaned session id. Branch replay stays primary (D7); disk is the fallback for branches pruned before the snapshot was appended. *(pi-xtodo)*
-- **M8** — **Settable `blocked` status alongside derived.** Tasks may explicitly carry a settable `blocked` flag for external blockers (CI, user input, PR review), distinct from the M2 graph-derived blocking. *(pix-todo)*
-- **M9** — **Subagent streaming.** Implement the event contract locally — bus events + auto-remove-on-complete columns for sub-tasks — without adopting the `pi-archimedes` meta package. *(pi-archimedes, internalized)*
+Trimmed on 2026-08-14 (`DECISIONS.md ## D8`) after scrutiny against Mario Zechner's "No built-in to-dos" post and `@jerryan/pi-todo-lite`'s archived lessons: keep human-observability surfaces and token-friction reducers; reject expansions of model-tracked state. `M7`/`M8` parked, `M9` dropped. Working order: **M6 (scoped) → M11 → M10**.
+
+- **M6** — **Goal anchor.** Mandatory `Goal:` line on the task list; rendered pinned in the compact widget; re-injected on `before_agent_start` so every turn re-anchors to the session objective. *(highest leverage on goal-drift; firstpick-adjacent)* **Scope check before starting (D8):** the pi-goals `/goal` machinery already pins an active goal with completion gating — M6's remaining value is non-`/goal` sessions; keep it small or fold the goal line into M10's `llmGuidance` snippet.
 - **M10** — **Config file + LLM-guidance snippet.** `~/.config/pi-todo/config.json` with `maxWidgetLines`, `collapseKey`, plus an optional `llmGuidance` snippet injected into the prompt block for user-tunable nudges. *(rpiv-todo; when this starts, fold in the 2026-08-13 pi-tasks survey findings: `maxVisible`, completed-drop-first collapse, `hiddenAt`)*
-- **M11** — **Delta ops: `todo_patch`.** Targeted mutation of existing tasks by ID (status/priority/content/blockedBy/rich fields, `appendDescription`, per-key metadata merge with `null`-deletes) without resending the list; desugars into the shared `todo_write` commit tail; terse delta result content. Spec: [`docs/specs/2026-08-14-m11-todo-patch.md`](./docs/specs/2026-08-14-m11-todo-patch.md). *(motivated by the 2026-08-13 ecosystem sweep — Claude Code's TodoWrite → TaskCreate/TaskUpdate migration and pi-todo-lite's batch-complete failure-mode notes)*
+- **M11** — **Delta ops: `todo_patch`.** Targeted mutation of existing tasks by ID (status/priority/content/blockedBy/rich fields, `appendDescription`, per-key metadata merge with `null`-deletes) without resending the list; desugars into the shared `todo_write` commit tail; terse delta result content. Spec: [`docs/specs/2026-08-14-m11-todo-patch.md`](./docs/specs/2026-08-14-m11-todo-patch.md). *(motivated by the 2026-08-13 ecosystem sweep — Claude Code's TodoWrite → TaskCreate/TaskUpdate migration and pi-todo-lite's batch-complete failure-mode notes; D8 caveat: the payoff assumes this harness's prompt-enforced incremental-update discipline — pi-todo-lite saw agents batch-complete without it)*
 - **Argument completions for `/done` and `/start`** — complete live task ids from the tracker via `getArgumentCompletions`, using each task's text as the item description so ids are never typed from memory; add a round-trip test asserting every suggestion the completer offers is accepted by the parser. *(not part of the cherry-pick sweep above)*
+
+## Dropped
+
+- **M9** — **Subagent streaming** *(dropped 2026-08-14, `DECISIONS.md ## D8`)*. The event contract was sourced from `@pi-archimedes/todo` against the pre-switch subagent stack; nicobailon's `pi-subagents` now owns child observability outright (missions, fleet status view, live chat progress cards, per-run `events.jsonl`, the `subagent-watch` pane). A todo-widget projection of child tasks would be a second source of truth — machine-written state in a model-facing list. The `M9` number is retired, never reused.
 
 ## Parking lot
 
@@ -36,6 +39,11 @@ The full parking lot lives in [`IDEAS.md`](./IDEAS.md). Items rolled forward fro
 - Optional `/todos` UI toggle for tombstoned tasks, deferred until the tombstone model proves stable.
 - Compact-widget refinements, considered after the first post-M4 merged version is used in normal Pi work.
 - ANSI-aware truncation for the compact widget, if real themed output shows narrow-width escape-sequence artifacts.
+
+Parked from `## Planned` in the 2026-08-14 trim (`DECISIONS.md ## D8`):
+
+- **M7 — Disk fallback.** Revive only after an actual branch-pruned-before-snapshot loss is observed; D7 stays the documented rule until then.
+- **M8 — Settable `blocked` status.** Revive on a concrete external-blocker need post-M11; implement then as a `todo_patch`-settable additive flag.
 
 ## Out of scope (V1)
 

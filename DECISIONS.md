@@ -136,3 +136,27 @@ Other rich fields (`description`, `owner`, `activeForm`) are passed through as-i
 **Consequences:**
 - `session_before_compact` persists the snapshot; `session_compact` refreshes widgets/state. `session_start` does **not** fire after compaction (`session_compact` is the post-compaction event).
 - A malformed latest replay input clears store and tracker symmetrically; both projections must agree or the invariant is broken.
+
+---
+
+## D8 — 2026-08-14 roadmap trim: drop M9, park M7 and M8, scope M6
+
+**Date:** 2026-08-14
+**Source:** Scrutiny pass against Mario Zechner's "No built-in to-dos" / "No plan mode" sections (mariozechner.at, 2025-11-30) and `@jerryan/pi-todo-lite`'s archived lessons + reminder-system changelog; prompted by the subagent-stack switch to nicobailon's `pi-subagents`.
+**Status:** accepted
+
+**Lens:** pi-todo's defensible core is human observability (widget, `/todos`, tombstone audit, replay integrity) plus harness-enforced update discipline. Planned items that expand *model-tracked state* are the ones the external evidence argues against; items that serve the human's eyes or reduce token friction survive.
+
+**Decisions:**
+- **M9 (Subagent streaming) dropped.** The event contract was sourced from `@pi-archimedes/todo` for the pre-switch orchestration. nicobailon's `pi-subagents` owns child observability (missions, fleet status view, live chat progress cards, per-run `events.jsonl`, `subagent-watch` pane); a todo-widget projection would be a second source of truth of machine-written state in a model-facing list. Number retired, never reused.
+- **M7 (Disk fallback) parked.** No recorded incident of a branch pruned before its snapshot; a disk copy duplicates state for a hypothetical failure. D7 remains the documented rule. Revival condition: an actual observed loss.
+- **M8 (Settable `blocked`) parked.** pi-todo-lite's field observation — "LLMs rarely explicitly mark tasks in-progress" — applies directly to an externally-settable status flag: it would be set once and never cleared, or never set. Revival condition: a concrete external-blocker need post-M11; implement then as a `todo_patch`-settable additive flag.
+- **M6 (Goal anchor) kept with a scope check.** The pi-goals `/goal` machinery already pins an active goal with completion gating; M6's remaining value is non-`/goal` sessions. Keep small or fold into M10's `llmGuidance` snippet.
+- **M11 (`todo_patch`) kept, caveat recorded.** It lowers the *cost* of incremental updates; the *desire* is supplied by this harness's prompt discipline, not by models natively (pi-todo-lite lesson 1). The payoff may not generalize to undisciplined harnesses.
+
+**Existing countermeasures noted (why the archive lessons don't fell pi-todo wholesale):** every-turn prompt injection makes the list pushed state, never queried (lesson 3); no idle-task reminders — rejected in the M11 spec (lesson 2); slash helpers send auditable `todo_write` follow-ups, never mutating behind the model (D2).
+
+**Consequences:**
+- `ROADMAP.md ## Planned` = M6 (scoped) → M11 → M10, plus the `/done`/`/start` argument completions.
+- New `ROADMAP.md ## Dropped` section records M9; parked items live in `IDEAS.md ## Parked milestones`.
+- M-numbers are never reused; `M7`/`M8`/`M9` keep their slugs if ever revived.
