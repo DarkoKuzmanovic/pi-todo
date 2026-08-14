@@ -12,17 +12,16 @@ This roadmap stays high-level. Detailed scope, task decomposition, dependencies,
 - **M3** — Audit-friendly tombstones (2026-06-01). `todo_remove` soft-deletes via `deletedAt?: number`; hidden everywhere; preserved through replay, snapshot, and full-replace (B1). 275 tests.
 - **M4** — Optional rich task fields (2026-06-02). `description` / `owner` / `activeForm` / `metadata` with the M-c visibility map; prompt-safe `activeForm` rendering (I3); type-preserving metadata replay (B1); I2 resurrection authoritative. 359 tests.
 - **M5** — Standalone `oh-my-todo` cleanup (2026-06-02 fast-track). Recoverable move + targeted `find -delete`. No behavior change (`pi.extensions` had been `[]` since M0).
-- **M11** — Delta ops: `todo_patch` (2026-08-14). Targeted mutation of existing tasks by ID without resending the list (status/priority/content/blockedBy/rich fields, `appendDescription`, per-key metadata merge with `null`-deletes); desugars into the shared `todo_write` commit tail; whole-call atomic rejects with self-healing content; replay included; equivalence/symmetry/atomicity/e2e suite. 403 tests. Spec: [`docs/specs/2026-08-14-m11-todo-patch.md`](./docs/specs/2026-08-14-m11-todo-patch.md).
 
 ## Current
 
-*(no active build — the next milestone is up to the human/orchestrator; on-demand `PLAN.md` is created when a build starts)*
+- **M11** — Delta ops: `todo_patch` — implementation, protected review, §9 verification, and docs complete; pending the mandatory live `/reload` → patch → `/compact` replay trial before graduation to Released. Spec: [`docs/specs/2026-08-14-m11-todo-patch.md`](./docs/specs/2026-08-14-m11-todo-patch.md).
 
 ## Planned
 
 Cherry-picks drawn from a 2026-06-02 comparison sweep of `@juicesharp/rpiv-todo`, `@firstpick/pi-extension-todo-progress`, `@xaccefy/pi-xtodo`, `@pi-archimedes/todo`, `@xynogen/pix-todo`. Implementation order may shift; milestones graduate to `## Released` when shipped.
 
-Trimmed on 2026-08-14 (`DECISIONS.md ## D8`) after scrutiny against Mario Zechner's "No built-in to-dos" post and `@jerryan/pi-todo-lite`'s archived lessons: keep human-observability surfaces and token-friction reducers; reject expansions of model-tracked state. `M7`/`M8` parked, `M9` dropped, `M11` shipped 2026-08-14. Working order: **M6 (scoped) → M10**.
+Trimmed on 2026-08-14 (`DECISIONS.md ## D8`) after scrutiny against Mario Zechner's "No built-in to-dos" post and `@jerryan/pi-todo-lite`'s archived lessons: keep human-observability surfaces and token-friction reducers; reject expansions of model-tracked state. `M7`/`M8` parked, `M9` dropped, `M11` is in close-out. Next planned order after M11: **M6 (scoped) → M10**.
 
 - **M6** — **Goal anchor.** Mandatory `Goal:` line on the task list; rendered pinned in the compact widget; re-injected on `before_agent_start` so every turn re-anchors to the session objective. *(highest leverage on goal-drift; firstpick-adjacent)* **Scope check before starting (D8):** the pi-goals `/goal` machinery already pins an active goal with completion gating — M6's remaining value is non-`/goal` sessions; keep it small or fold the goal line into M10's `llmGuidance` snippet.
 - **M10** — **Config file + LLM-guidance snippet.** `~/.config/pi-todo/config.json` with `maxWidgetLines`, `collapseKey`, plus an optional `llmGuidance` snippet injected into the prompt block for user-tunable nudges. *(rpiv-todo; when this starts, fold in the 2026-08-13 pi-tasks survey findings: `maxVisible`, completed-drop-first collapse, `hiddenAt`)*

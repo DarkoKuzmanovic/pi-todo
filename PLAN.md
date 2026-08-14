@@ -46,7 +46,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ## Deferred
 
-*(empty)*
+- Widen `runtime.processToolResult` to recognize `todo_patch` directly. M11 deliberately passes gate-compatible `"todo_write"` from the shared commit tail so widget/tracker refresh remains correct; direct runtime naming is a separate internal cleanup, not required for the public contract or replay.
 
 ## Conventions
 
@@ -55,7 +55,9 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ## Gate log
 
-- **2026-08-14T07:48Z — M11-T5 / M11.3 accepted.** Worker 35bce737 updated README, CHANGELOG, and ROADMAP; AGENTS.md stayed unchanged because T4 surfaced no new durable project lesson. Parent corrected the CHANGELOG success example to the exact terse result shape (including blocked count) and preserved the M11 spec link in ROADMAP Released. Freshness gates: README, ROADMAP, and CHANGELOG each passed `readme_toc.py --check` with balanced fences and no broken anchors; `git diff --check` passed. Documentation: README — tool table, plan/progress/remove contract, dependency clear, and rich-field patch semantics updated. AGENTS — no durable lesson delta.
+- **2026-08-14T07:52Z — Automated close-out gate passed; live trial pending.** `npm test`: 15 files / 403 tests passed. Full `biome check src` initially exposed two pre-existing test-only violations; commit 0293925 removed an unused local and made an optional-chain assertion safe, after which Biome passed all 30 source files and the full test suite stayed green. README/ROADMAP/CHANGELOG freshness checks passed with balanced fences and no broken anchors. `tsc --noEmit` remains unavailable because the repository has no `tsconfig.json`. The project-required live `/reload` → `todo_patch` → `/compact` replay trial remains the only close-out gate.
+
+- **2026-08-14T07:48Z — M11-T5 / M11.3 accepted.** Worker 35bce737 updated README, CHANGELOG, and ROADMAP; AGENTS.md stayed unchanged because T4 surfaced no new durable project lesson. Parent corrected the CHANGELOG success example to the exact terse result shape (including blocked count) and preserved the M11 spec link. Freshness gates: README, ROADMAP, and CHANGELOG each passed `readme_toc.py --check` with balanced fences and no broken anchors; `git diff --check` passed. ROADMAP now keeps M11 in Current until the mandatory live replay trial passes. Documentation: README — tool table, plan/progress/remove contract, dependency clear, and rich-field patch semantics updated. AGENTS — no durable lesson delta.
 
 - **2026-08-14T07:36Z — M11.2 protected review PASS-WITH-NOTES.** Reviewer ce2093a8 found no blockers or should-fixes. It accepted §3 rejection coverage in `src/e2e.test.ts` as stronger equivalent evidence through the real registered tool path, with pure §2 rules remaining in `src/patch.test.ts`. Residual note: no independent static typecheck exists without a repo `tsconfig.json`; M11.3 docs remain required before release. Review-dispatches: 1/2 for M11.2 boundary used. Parent consulted the active Pi v24.15.0 `docs/extensions.md`, `docs/session-format.md`, `docs/sessions.md`, `docs/compaction.md`, `examples/extensions/README.md`, and shipped `todo.ts` example.
 
@@ -70,6 +72,24 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 - **2026-08-14 — scheduler.mode → hard.** M11-T2/T4 use `effort: hard`; standard mode defers them as `route_unavailable`. Mode raised so hard tasks can schedule (ceilings.hard remains 1).
 
 - **2026-08-14T00:14Z — M11-T1 accepted.** Worker 96262f99 delivered src/schemas.ts + src/patch.ts (recovered from worktree transcript after cleanup). Parent added src/patch.test.ts (7 cases) for T1 acceptance; T4 expands §9. npm test: 368 passed. Outcome review deferred until M11.1 (after T2).
+
+## Run metrics
+
+- dispatches: 5
+- review-dispatches: 3
+- worker-retries: 0
+- burned: 0
+- oracle: 0
+- direct-edits: 5
+- child-runtime-minutes: 21.0
+
+## Close-out handoff
+
+- **Done:** M11.1 implementation, M11.2 replay + §9 suite, protected review, M11.3 documentation, and automated close-out verification.
+- **Next:** In this live Pi session, run `/reload`; seed two tasks with `todo_write`; batch-flip one to `completed` and one to `in_progress` with `todo_patch`; verify terse result + widget/prompt; run `/compact`; then verify `/todos`, widget, and prompt still show the patched state. On success, set `completed-at`, graduate ROADMAP M11 Current → Released, record the live evidence, and make the final local close-out commit.
+- **Open questions:** none.
+- **Confidence gaps:** no project `tsconfig.json`, so static TypeScript checking is unavailable; automated runtime coverage is 403 passing tests.
+- **Delivery:** local. Branch `crew/m11-todo-patch`; no push or PR authorized.
 
 ## Crew v2 active DAG
 
