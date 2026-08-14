@@ -22,7 +22,7 @@ function detailsFor(id: string): TaskDetails {
 }
 
 function makeToolEntry(
-	toolName: "todo_write" | "todo_remove",
+	toolName: "todo_write" | "todo_remove" | "todo_patch",
 	details: unknown,
 ): unknown {
 	return {
@@ -130,5 +130,56 @@ describe("latestTodoReplaySource", () => {
 		const branch = [null, undefined, 42, "bad", { type: "message" }];
 
 		expect(latestTodoReplaySource(branch)).toBeUndefined();
+	});
+});
+
+describe("M11-T3/T4: todo_patch as a replay source", () => {
+	it("recognizes a todo_patch tool result as the latest replay source", () => {
+		const branch = [makeToolEntry("todo_patch", detailsFor("t9"))];
+		const result = latestTodoReplaySource(branch);
+		expect(result?.kind).toBe("tool_result");
+		if (result?.kind === "tool_result") {
+			expect(result.toolName).toBe("todo_patch");
+			expect(result.details).toEqual(detailsFor("t9"));
+		}
+	});
+
+	it("a later todo_patch result overrides an earlier todo_write result", () => {
+		const branch = [
+			makeToolEntry("todo_write", detailsFor("t1")),
+			makeToolEntry("todo_patch", detailsFor("t2")),
+		];
+		const result = latestTodoReplaySource(branch);
+		expect(result?.kind).toBe("tool_result");
+		if (result?.kind === "tool_result") {
+			expect(result.toolName).toBe("todo_patch");
+			expect((result.details as TaskDetails | undefined)?.tasks[0]?.id).toBe("t2");
+		}
+	});
+
+	it("a later todo_write result overrides an earlier todo_patch result", () => {
+		const branch = [
+			makeToolEntry("todo_patch", detailsFor("t1")),
+			makeToolEntry("todo_write", detailsFor("t3")),
+		];
+		const result = latestTodoReplaySource(branch);
+		expect(result?.kind).toBe("tool_result");
+		if (result?.kind === "tool_result") {
+			expect(result.toolName).toBe("todo_write");
+			expect((result.details as TaskDetails | undefined)?.tasks[0]?.id).toBe("t3");
+		}
+	});
+
+	it("a todo_patch result overrides an earlier custom snapshot", () => {
+		const branch = [
+			makeCustomSnapshot(createTodoSnapshot(detailsFor("t1"))),
+			makeToolEntry("todo_patch", detailsFor("t4")),
+		];
+		const result = latestTodoReplaySource(branch);
+		expect(result?.kind).toBe("tool_result");
+		if (result?.kind === "tool_result") {
+			expect(result.toolName).toBe("todo_patch");
+			expect((result.details as TaskDetails | undefined)?.tasks[0]?.id).toBe("t4");
+		}
 	});
 });

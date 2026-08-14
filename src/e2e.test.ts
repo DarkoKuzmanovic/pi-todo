@@ -14,7 +14,7 @@
  * registered `session_compact` handler, and asserts that the
  * user-facing surface sees the reconstructed state.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import todoExtension, { runtime } from "./index";
 import { isBlocked } from "./deps";
@@ -24,6 +24,7 @@ import { store as todoStore } from "./state";
 import { buildSystemPromptBlock } from "./prompt";
 import { TodoViewComponent } from "./component";
 import type { Task } from "./types";
+import { applyPatch } from "./patch";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1801,5 +1802,329 @@ describe("M4 reviewer amendment: todo_read exposes rich fields in details, hides
 		expect(t.owner).toBeUndefined();
 		expect(t.activeForm).toBeUndefined();
 		expect(t.metadata).toBeUndefined();
+	});
+});
+
+// ── M11 T4: todo_patch — equivalence, atomicity, B1, timestamps, e2e ───────────
+
+async function callTodoPatch(
+	mockPi: MockPi,
+	params: { patches: Array<Record<string, unknown>> },
+	ctx: ExtensionContext,
+): Promise<{ content: { type: string; text: string }[]; details?: { tasks?: unknown[] } }> {
+	const tool = mockPi.tools.get("todo_patch");
+	if (!tool) throw new Error("todo_patch tool not registered");
+	const result = (await tool.execute("call-1", params, undefined, undefined, ctx)) as {
+		content: { type: string; text: string }[];
+		details?: { tasks?: unknown[] };
+	};
+	return result;
+}
+
+describe("M11-T4: equivalence — todo_patch leaves state byte-identical to todo_write(fullMergedList)", () => {
+	beforeEach(() => {
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	const SEED_LISTS: Array<Array<Record<string, unknown>>> = [
+		[{ id: "t1", content: "one", status: "pending", priority: "medium" }],
+		[
+			{ id: "t1", content: "one", status: "pending", priority: "medium" },
+			{ id: "t2", content: "two", status: "in_progress", priority: "high", blockedBy: ["t1"] },
+		],
+		[
+			{
+				id: "t1",
+				content: "rich",
+				status: "pending",
+				priority: "low",
+				description: "notes",
+				owner: "agent-1",
+				activeForm: "doing",
+				metadata: { a: 1, b: true },
+			},
+		],
+	];
+
+	const PATCH_SETS: Array<Array<Record<string, unknown>>> = [
+		[{ id: "t1", status: "completed" }],
+		[{ id: "t2", status: "in_progress", priority: "low" }],
+		[{ id: "t1", content: "renamed" }],
+		[{ id: "t1", blockedBy: [] }],
+		[{ id: "t1", description: "fresh notes" }],
+		[{ id: "t1", appendDescription: "added" }],
+		[{ id: "t1", metadata: { keep: true, gone: null } }],
+		[
+			{ id: "t1", status: "completed" },
+			{ id: "t2", status: "in_progress" },
+		],
+		[{ id: "t1", blockedBy: ["t2"] }],
+		[{ id: "t1", blockedBy: ["ghost"] }],
+	];
+
+	const CASES: Array<{ seed: Array<Record<string, unknown>>; patches: Array<Record<string, unknown>> }> = [
+		{ seed: SEED_LISTS[0], patches: PATCH_SETS[0] },
+		{ seed: SEED_LISTS[0], patches: PATCH_SETS[2] },
+		{ seed: SEED_LISTS[0], patches: PATCH_SETS[3] },
+		{ seed: SEED_LISTS[0], patches: PATCH_SETS[4] },
+		{ seed: SEED_LISTS[0], patches: PATCH_SETS[5] },
+		{ seed: SEED_LISTS[0], patches: PATCH_SETS[6] },
+		{ seed: SEED_LISTS[1], patches: PATCH_SETS[0] },
+		{ seed: SEED_LISTS[1], patches: PATCH_SETS[1] },
+		{ seed: SEED_LISTS[1], patches: PATCH_SETS[7] },
+		{ seed: SEED_LISTS[1], patches: PATCH_SETS[8] },
+		{ seed: SEED_LISTS[1], patches: PATCH_SETS[9] },
+		{ seed: SEED_LISTS[2], patches: PATCH_SETS[4] },
+		{ seed: SEED_LISTS[2], patches: PATCH_SETS[6] },
+		{ seed: SEED_LISTS[2], patches: PATCH_SETS[0] },
+	];
+
+	for (const testCase of CASES) {
+		it(`seed ${testCase.seed.map((t) => t.id).join("+")} × patches ${testCase.patches.map((p) => p.id).join("+")}`, async () => {
+			vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+
+			// Path A: plan via todo_write, flip via todo_patch.
+			const mockPiA = buildMockPi();
+			todoExtension(mockPiA.pi);
+			const ctxA = buildCtx(snapshotBranch([]), false).ctx;
+			await callTodoWrite(mockPiA, { tasks: [...testCase.seed] }, ctxA);
+			await callTodoPatch(mockPiA, { patches: [...testCase.patches] }, ctxA);
+			const stateA = cloneStoreTasks();
+			const idCounterA = todoStore.idCounter;
+
+			// Path B: todo_write with the desugared full merged list (spec §4).
+			const mockPiB = buildMockPi();
+			todoExtension(mockPiB.pi);
+			const ctxB = buildCtx(snapshotBranch([]), false).ctx;
+			await callTodoWrite(mockPiB, { tasks: [...testCase.seed] }, ctxB);
+			const merged = todoStore.tasks
+				.filter((t) => t.deletedAt == null)
+				.map((t) => {
+					const patch = testCase.patches.find((p) => p.id === t.id);
+					return patch ? applyPatch(t, patch as unknown as Parameters<typeof applyPatch>[1]).task : t;
+				});
+			await callTodoWrite(
+				mockPiB,
+				{ tasks: merged as unknown as Array<Record<string, unknown>> },
+				ctxB,
+			);
+			const stateB = cloneStoreTasks();
+			const idCounterB = todoStore.idCounter;
+
+			expect(stateA).toEqual(stateB);
+			expect(idCounterA).toBe(idCounterB);
+		});
+	}
+});
+
+describe("M11-T4: todo_patch atomicity, B1, and timestamps through the entry point", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		mockPi = buildMockPi();
+		todoExtension(mockPi.pi);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	async function seed(tasks: Array<Record<string, unknown>>): Promise<ExtensionContext> {
+		const { ctx } = buildCtx(snapshotBranch([]), false);
+		await callTodoWrite(mockPi, { tasks }, ctx);
+		return ctx;
+	}
+
+	it("rejects unknown ids atomically: state and idCounter untouched, self-healing content", async () => {
+		const ctx = await seed([
+			{ id: "t1", content: "one", status: "pending", priority: "medium" },
+			{ id: "t2", content: "two", status: "pending", priority: "medium" },
+		]);
+		const before = cloneStoreTasks();
+		const idCounterBefore = todoStore.idCounter;
+
+		const result = await callTodoPatch(mockPi, { patches: [{ id: "ghost", status: "completed" }] }, ctx);
+
+		const text = result.content[0]?.text ?? "";
+		expect(text).toContain("unknown or removed task id");
+		expect(text).toContain("one");
+		expect(todoStore.tasks).toEqual(before);
+		expect(todoStore.idCounter).toBe(idCounterBefore);
+	});
+
+	it("rejects duplicate ids within one call atomically", async () => {
+		const ctx = await seed([{ id: "t1", content: "one", status: "pending", priority: "medium" }]);
+		const before = cloneStoreTasks();
+
+		const result = await callTodoPatch(
+			mockPi,
+			{
+				patches: [
+					{ id: "t1", status: "completed" },
+					{ id: "t1", priority: "high" },
+				],
+			},
+			ctx,
+		);
+
+		expect(result.content[0]?.text ?? "").toContain("duplicate task id");
+		expect(todoStore.tasks).toEqual(before);
+	});
+
+	it("rejects description + appendDescription on the same patch atomically", async () => {
+		const ctx = await seed([{ id: "t1", content: "one", status: "pending", priority: "medium" }]);
+		const before = cloneStoreTasks();
+
+		const result = await callTodoPatch(
+			mockPi,
+			{ patches: [{ id: "t1", description: "x", appendDescription: "y" }] },
+			ctx,
+		);
+
+		expect(result.content[0]?.text ?? "").toContain("cannot set both description and appendDescription");
+		expect(todoStore.tasks).toEqual(before);
+	});
+
+	it("rejects a malformed metadata container atomically with self-healing content", async () => {
+		const ctx = await seed([{ id: "t1", content: "one", status: "pending", priority: "medium" }]);
+		const before = cloneStoreTasks();
+
+		const result = await callTodoPatch(
+			mockPi,
+			{ patches: [{ id: "t1", metadata: "nope" as unknown as Record<string, unknown> }] },
+			ctx,
+		);
+
+		const text = result.content[0]?.text ?? "";
+		expect(text).toContain("one");
+		expect(todoStore.tasks).toEqual(before);
+	});
+
+	it("rejects a dependency cycle introduced by blockedBy patches atomically", async () => {
+		const ctx = await seed([
+			{ id: "t1", content: "one", status: "pending", priority: "medium" },
+			{ id: "t2", content: "two", status: "pending", priority: "medium" },
+		]);
+		const before = cloneStoreTasks();
+		const idCounterBefore = todoStore.idCounter;
+
+		const result = await callTodoPatch(
+			mockPi,
+			{
+				patches: [
+					{ id: "t1", blockedBy: ["t2"] },
+					{ id: "t2", blockedBy: ["t1"] },
+				],
+			},
+			ctx,
+		);
+
+		const text = result.content[0]?.text ?? "";
+		expect(text).toContain("Dependency cycle detected");
+		expect(text).toContain("one");
+		expect(todoStore.tasks).toEqual(before);
+		expect(todoStore.idCounter).toBe(idCounterBefore);
+	});
+
+	it("B1: preserves hidden tombstones across a successful patch and rejects patching a tombstoned id", async () => {
+		const ctx = await seed([
+			{ id: "t1", content: "one", status: "pending", priority: "medium" },
+			{ id: "t2", content: "two", status: "pending", priority: "medium" },
+		]);
+		await callTodoRemove(mockPi, { ids: ["t2"] }, ctx);
+		expect(todoStore.tasks.find((t) => t.id === "t2")?.deletedAt).toBeTypeOf("number");
+
+		const ok = await callTodoPatch(mockPi, { patches: [{ id: "t1", status: "completed" }] }, ctx);
+		expect(ok.content[0]?.text ?? "").toContain("Patched t1 → completed");
+		expect(todoStore.tasks).toHaveLength(2);
+		expect(todoStore.tasks.find((t) => t.id === "t2")?.deletedAt).toBeTypeOf("number");
+
+		const before = cloneStoreTasks();
+		const reject = await callTodoPatch(mockPi, { patches: [{ id: "t2", status: "completed" }] }, ctx);
+		expect(reject.content[0]?.text ?? "").toContain("unknown or removed task id");
+		expect(todoStore.tasks).toEqual(before);
+	});
+
+	it("timestamps: pending→in_progress stamps startedAt; →completed stamps completedAt; completed→pending clears completedAt", async () => {
+		vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+		const ctx = await seed([{ id: "t1", content: "one", status: "pending", priority: "medium" }]);
+
+		await callTodoPatch(mockPi, { patches: [{ id: "t1", status: "in_progress" }] }, ctx);
+		expect(todoStore.tasks[0]?.startedAt).toBe(1_700_000_000_000);
+		expect(todoStore.tasks[0]?.completedAt).toBeUndefined();
+
+		await callTodoPatch(mockPi, { patches: [{ id: "t1", status: "completed" }] }, ctx);
+		expect(todoStore.tasks[0]?.startedAt).toBe(1_700_000_000_000);
+		expect(todoStore.tasks[0]?.completedAt).toBe(1_700_000_000_000);
+
+		await callTodoPatch(mockPi, { patches: [{ id: "t1", status: "pending" }] }, ctx);
+		expect(todoStore.tasks[0]?.completedAt).toBeUndefined();
+	});
+});
+
+describe("M11-T4 e2e: plan via todo_write, flip via todo_patch, every surface sees the patched state", () => {
+	let mockPi: MockPi;
+
+	beforeEach(() => {
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		mockPi = buildMockPi();
+		todoExtension(mockPi.pi);
+	});
+
+	it("widget counts, prompt block, /todos, and terse content all reflect the patch", async () => {
+		const { ctx, widgetCalls } = buildCtx(snapshotBranch([]), true);
+		await callTodoWrite(
+			mockPi,
+			{
+				tasks: [
+					{ id: "t1", content: "first", status: "pending", priority: "medium" },
+					{ id: "t2", content: "second", status: "pending", priority: "medium" },
+				],
+			},
+			ctx,
+		);
+
+		const result = await callTodoPatch(
+			mockPi,
+			{
+				patches: [
+					{ id: "t1", status: "completed" },
+					{ id: "t2", status: "in_progress" },
+				],
+			},
+			ctx,
+		);
+
+		const text = result.content[0]?.text ?? "";
+		expect(text).toMatch(/^Patched t1 → completed, t2 → in_progress\.\n1 active, 0 pending \(0 blocked\), 1 done\.$/);
+
+		const details = result.details as { tasks?: Array<{ id: string; status: string }> } | undefined;
+		expect(details?.tasks?.find((t) => t.id === "t1")?.status).toBe("completed");
+		expect(details?.tasks?.find((t) => t.id === "t2")?.status).toBe("in_progress");
+
+		const widgetLines = renderCompactWidget(widgetCalls).join("\n");
+		expect(widgetLines).toContain("second");
+		expect(widgetLines).not.toContain("first");
+
+		const block = buildSystemPromptBlock();
+		expect(block).toContain("second");
+		expect(block).toContain("← in progress");
+		expect(block).toContain("1/2 tasks completed.");
+		expect(block).not.toContain("first");
+
+		const { ctx: todosCtx, notifications } = buildCtx(snapshotBranch([]), false);
+		await mockPi.commands.get("todos")?.("", todosCtx);
+		expect(notifications).toHaveLength(1);
+		const todoText = notifications[0]?.message ?? "";
+		expect(todoText).toContain("[t1] first");
+		expect(todoText).toContain("[t2] second");
 	});
 });

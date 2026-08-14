@@ -931,3 +931,82 @@ describe("M4 I2 tombstone-with-rich-fields", () => {
 		expect(activeTasks(todoStore.tasks)).toHaveLength(0);
 	});
 });
+
+// ── M11 T4: todo_patch replay symmetry ─────────────────────────────────────────
+describe("M11 T4: todo_patch replay symmetry", () => {
+	beforeEach(() => {
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+	});
+
+	function makePatchEntry(details: unknown): unknown {
+		return {
+			type: "message",
+			message: { role: "toolResult", toolName: "todo_patch", details },
+		};
+	}
+
+	const patched: Task = {
+		id: "t1",
+		content: "Patched content",
+		status: "completed",
+		priority: "high",
+		createdAt: 1000,
+		startedAt: 2000,
+		completedAt: 3000,
+		description: "note",
+		metadata: { k: "v" },
+	};
+
+	it("both store and tracker reconstruct the patched list when todo_patch is the latest mutation", () => {
+		const branch = [
+			makePatchEntry({ tasks: [makeTask({ id: "t1", content: "old", status: "pending" })] }),
+			makePatchEntry({ tasks: [patched] }),
+		];
+		const ctx = mockCtx(branch);
+
+		reconstructState(ctx);
+		const runtime = new TodoRuntime();
+		runtime.reconstructFromSession(branch, ctx);
+
+		expect(todoStore.tasks).toHaveLength(1);
+		expect(todoStore.tasks[0]?.id).toBe("t1");
+		expect(todoStore.tasks[0]?.content).toBe("Patched content");
+		expect(todoStore.tasks[0]?.status).toBe("completed");
+		expect(todoStore.tasks[0]?.metadata).toEqual({ k: "v" });
+		expect(runtime.tracker.tasks).toHaveLength(1);
+		expect(runtime.tracker.tasks[0]?.content).toBe("Patched content");
+		expect(runtime.tracker.tasks[0]?.status).toBe("completed");
+		expect(runtime.tracker.tasks[0]?.metadata).toEqual({ k: "v" });
+	});
+
+	it("failing-closed: a todo_patch result ALONE (no earlier todo_write or snapshot) reconstructs both projections", () => {
+		// If TODO_PATCH ever leaves isTodoToolName, this branch has no replay
+		// source and both projections come back empty — this test goes red.
+		const branch = [makePatchEntry({ tasks: [patched] })];
+		const ctx = mockCtx(branch);
+
+		reconstructState(ctx);
+		const runtime = new TodoRuntime();
+		runtime.reconstructFromSession(branch, ctx);
+
+		expect(todoStore.tasks[0]?.id).toBe("t1");
+		expect(runtime.tracker.tasks[0]?.id).toBe("t1");
+	});
+
+	it("a later todo_patch result overrides an earlier snapshot in both projections", () => {
+		const snapshotData = createTodoSnapshot({ tasks: [makeTask({ id: "t1", content: "snap" })] });
+		const branch = [
+			{ type: "custom", customType: TODO_SNAPSHOT_CUSTOM_TYPE, data: snapshotData },
+			makePatchEntry({ tasks: [patched] }),
+		];
+		const ctx = mockCtx(branch);
+
+		reconstructState(ctx);
+		const runtime = new TodoRuntime();
+		runtime.reconstructFromSession(branch, ctx);
+
+		expect(todoStore.tasks[0]?.content).toBe("Patched content");
+		expect(runtime.tracker.tasks[0]?.content).toBe("Patched content");
+	});
+});

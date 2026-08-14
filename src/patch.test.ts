@@ -109,3 +109,32 @@ describe("applyPatch (M11 pure merge rules)", () => {
 	});
 
 });
+
+describe("applyPatch M11 §2 edge rules (T4)", () => {
+	it("blockedBy replacement copies the array (no aliasing into the caller's array)", () => {
+		const deps = ["t2", "t3"];
+		const next = applyPatch(base(), { id: "t1", blockedBy: deps });
+		deps.push("t4");
+		expect(next.blockedBy).toEqual(["t2", "t3"]);
+	});
+
+	it("appendDescription on an empty-string description sets rather than prefixes", () => {
+		const next = applyPatch(base({ description: "" }), { id: "t1", appendDescription: "notes" });
+		expect(next.description).toBe("notes");
+	});
+
+	it("metadata merge keeps existing keys when a null deletes an absent key", () => {
+		const next = applyPatch(base({ metadata: { a: 1 } }), { id: "t1", metadata: { ghost: null, b: "x" } });
+		expect(next.metadata).toEqual({ a: 1, b: "x" });
+	});
+
+	it("metadata merge that nulls every key removes the bag entirely", () => {
+		const next = applyPatch(base({ metadata: { a: 1, b: 2 } }), { id: "t1", metadata: { a: null, b: null } });
+		expect(next.metadata).toBeUndefined();
+	});
+
+	it("an empty patch leaves the task byte-identical", () => {
+		const task = base({ description: "d", metadata: { k: 1 } });
+		expect(applyPatch(task, { id: "t1" })).toEqual(task);
+	});
+});

@@ -41,7 +41,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 ## Outcome map
 
 - [x] **M11.1** — Implement `todo_patch` (schema, pure `applyPatch`, shared `commitTaskList`, register/execute, render, prompt guidelines)
-- [ ] **M11.2** — Replay inclusion + full §9 test obligations (equivalence, symmetry/replay, atomicity, B1, timestamps, e2e)
+- [x] **M11.2** — Replay inclusion + full §9 test obligations (equivalence, symmetry/replay, atomicity, B1, timestamps, e2e)
 - [ ] **M11.3** — Docs rollout (README, CHANGELOG, ROADMAP, AGENTS lesson if warranted)
 
 ## Deferred
@@ -54,6 +54,10 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 - `src/patch.test.ts` seeded by parent at T1 acceptance; T4 expands to full §9 (equivalence, tool-entry §3 rejects).
 
 ## Gate log
+
+- **2026-08-14T07:36Z — M11.2 protected review PASS-WITH-NOTES.** Reviewer ce2093a8 found no blockers or should-fixes. It accepted §3 rejection coverage in `src/e2e.test.ts` as stronger equivalent evidence through the real registered tool path, with pure §2 rules remaining in `src/patch.test.ts`. Residual note: no independent static typecheck exists without a repo `tsconfig.json`; M11.3 docs remain required before release. Review-dispatches: 1/2 for M11.2 boundary used. Parent consulted the active Pi v24.15.0 `docs/extensions.md`, `docs/session-format.md`, `docs/sessions.md`, `docs/compaction.md`, `examples/extensions/README.md`, and shipped `todo.ts` example.
+
+- **2026-08-14T07:33Z — M11-T4 accepted; M11.2 complete pending protected review.** Worker 4d8c4411 added 34 tests across patch, replay, symmetry, and e2e suites. Parent recovered the pruned worktree from transcript edit payloads and integrated only the four declared test files. `npm test`: 15 files / 403 tests passed. Biome check on the four changed files passed. `tsc --noEmit` is unavailable because this repo has no `tsconfig.json` (compiler printed help and exited 1); the two worker-reported cast errors were corrected during integration. §3 rejections are pinned through the real `todo_patch` entry point in `src/e2e.test.ts`; pure `src/patch.test.ts` owns §2 merge/clear rules. Documentation: README — no test-only delta; M11.3 owns the shipped tool docs. AGENTS — no durable lesson yet; worktree-pruning recovery is already recorded in Conventions.
 
 - **2026-08-14T00:26Z — M11-T3 accepted.** TODO_PATCH added to replay recognition set; TODO_SNAPSHOT_VERSION stays 1. npm test 369 passed. Round-trip proof deferred to T4.
 
@@ -348,20 +352,21 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
         "ceiling": 2,
         "effort": "hard",
         "receipt": {
-          "artifactPath": null,
+          "artifactPath": "/home/quzma/.pi/agent/sessions/--home-quzma-.pi-agent-extensions-pi-todo--/subagent-artifacts/outputs/call_WeSUF8adVnRrxKhL35ILORw5|fc_01eef2a672bcf2d5016a7ec16c9f0c819182f5926a7428bb32/M11-T4.md",
           "basisDagHash": "sha256:9db62ebdd70afa57f32fa0d8fb6a86aa2dd979990c1c417070192ca88affbbf5",
           "capabilityHash": "sha256:ce3b879c7678f904bec795a0781d7d3024dc1d18f557ec78098f11332171d0bc",
-          "outputState": null,
-          "receiptClass": null,
+          "model": "deepseek/deepseek-v4-flash:max",
+          "outputState": "present",
+          "receiptClass": "child_result",
           "requestedRoute": {
             "role": "worker"
           },
-          "runId": null,
-          "source": null,
-          "success": null,
+          "runId": "4d8c4411",
+          "source": "foreground",
+          "success": true,
           "waveId": "sha256:5eac2adb4b6c012792cc2ff4dfe4e7457144da8e784e23963ad565fc85c786b1"
         },
-        "status": "in_flight",
+        "status": "accepted",
         "supersedes": null
       }
     },
