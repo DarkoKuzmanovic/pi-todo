@@ -12,23 +12,27 @@
  *      branch, so /tree navigation and forking work correctly
  *
  * Tools:   todo_write   — replace the entire task list (atomic update)
+ *          todo_patch   — update existing tasks by ID without resending the list
  *          todo_read    — read the current task list
  *          todo_remove  — remove tasks by ID (soft-delete: tasks are stamped and retained in history)
  * Command: /todos       — open interactive full-screen task viewer
  */
 
-import type { CustomToolResultEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { CustomToolResultEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { TodoViewComponent } from "./component";
 import { buildSystemPromptBlock, formatListForLLM } from "./prompt";
-import { TodoRemoveParams, TodoWriteParams } from "./schemas";
+import { TodoPatchParams, TodoRemoveParams, TodoWriteParams } from "./schemas";
 import { registerTodoCommands } from "./commands";
+import { applyPatch } from "./patch";
+import type { TaskPatch } from "./patch";
 import { TodoRuntime } from "./runtime";
 import { reconstructState, store } from "./state";
 import { createTodoSnapshot, TODO_SNAPSHOT_CUSTOM_TYPE } from "./replay";
-import { formatStrippedWarning, validateDependencyGraph } from "./deps";
+import { formatStrippedWarning, isBlocked, validateDependencyGraph } from "./deps";
 import { coerceRichFields, validateMetadata } from "./rich-fields";
+import { STATUS_ICON } from "./types";
 import type { Task, TaskDetails, TaskPriority, TaskStatus } from "./types";
 
 // ── Runtime ────────────────────────────────────────────────────────────────────
@@ -43,6 +47,38 @@ function getBranchSafe(ctx: { sessionManager: { getBranch(): readonly unknown[] 
 	} catch {
 		return [];
 	}
+}
+
+// ── Shared commit tail (M11 — todo_write / todo_patch) ─────────────────────────
+
+/**
+ * The one state-mutation tail shared by `todo_write` and `todo_patch`
+ * (spec §4: "No second state-mutation path").
+ *
+ * B1 tombstone preservation: hidden tombstones whose ids are NOT in the
+ * candidate set survive, exactly as in `todo_write`'s full-replace path.
+ * Timestamps ride `applyStatusTransitions` (prev-vs-next per task), so
+ * `startedAt`/`completedAt`/revert-clears behave identically for a patch
+ * transition. `idCounter` is untouched here — patches never mint IDs.
+ */
+function commitTaskList(tasks: Task[], ctx: ExtensionContext): TaskDetails {
+	const candidateIds = new Set(tasks.map((t) => t.id));
+	const preservedTombstones = store.tasks.filter(
+		(t) => t.deletedAt != null && !candidateIds.has(t.id),
+	);
+
+	const finalTasks = [...tasks, ...preservedTombstones];
+	store.applyStatusTransitions(finalTasks);
+	store.setTasks(finalTasks);
+	store.syncIdCounter();
+	const details = { tasks: [...store.tasks] } satisfies TaskDetails;
+	// The runtime choke point gates on todo_write/todo_remove (src/runtime.ts);
+	// todo_patch also produces full-list TaskDetails, so the in-process widget /
+	// tracker / celebration refresh uses the gate-compatible name. The session
+	// branch records the REAL tool name ("todo_patch") — replay (M11-T3) reads
+	// from the branch, never from this call.
+	runtime.processToolResult("todo_write", details, ctx);
+	return details;
 }
 
 // ── Extension ──────────────────────────────────────────────────────────────────
@@ -116,12 +152,13 @@ export default function todoExtension(pi: ExtensionAPI): void {
 				"to break it into a structured plan before writing code or running commands. " +
 				"The task list is your north star — refer back to it to avoid drift. " +
 				"Each task should be specific, atomic, and actionable.",
-			"Before starting a task, call todo_write to set it to 'in_progress'. " +
+			"Before starting a task, call todo_patch to set it to 'in_progress' (or todo_write when creating the task). " +
 				"Only one task should be 'in_progress' at a time unless tasks are genuinely parallel.",
-			"Immediately after completing a task, call todo_write to mark it 'completed'. " +
+			"Immediately after completing a task, call todo_patch to mark it 'completed'. " +
 				"Do not batch completions — mark each task done as soon as it is finished. " +
 				"Completed tasks remain visible in the list; they are never automatically deleted.",
-			"todo_write REPLACES the entire list. Always include ALL tasks (both changed and unchanged) in every call.",
+			"todo_write REPLACES the entire list. Always include ALL tasks (both changed and unchanged) in every call. " +
+				"For status flips and single-task edits, prefer todo_patch.",
 			"To remove tasks, use todo_remove instead of omitting them from todo_write; removed tasks are soft-deleted (hidden from the active list but retained in history).",
 			"Optional rich fields (description, owner, metadata, activeForm) can be passed on each task. " +
 				"description and activeForm are user-authored strings; owner is a free-form id; " +
@@ -207,20 +244,8 @@ export default function todoExtension(pi: ExtensionAPI): void {
 				};
 			}
 
-			// B1: preserve stored tombstones whose ids are NOT in the incoming
-			// candidate set. The agent cannot see hidden tombstones, so its
-			// full-replace would erase them — but the audit trail must survive.
-			const candidateIds = new Set(validation.tasks.map((t) => t.id));
-			const preservedTombstones = store.tasks.filter(
-				(t) => t.deletedAt != null && !candidateIds.has(t.id),
-			);
-
-			const finalTasks = [...validation.tasks, ...preservedTombstones];
-			store.applyStatusTransitions(finalTasks);
-			store.setTasks(finalTasks);
-			store.syncIdCounter();
-			const details = { tasks: [...store.tasks] } satisfies TaskDetails;
-			runtime.processToolResult("todo_write", details, ctx);
+			// Shared commit tail (B1 tombstones, timestamps, widgets, tracker).
+			const details = commitTaskList(validation.tasks, ctx);
 
 			const warning = formatStrippedWarning(validation.strippedUnknown);
 			const listText = formatListForLLM();
@@ -246,6 +271,129 @@ export default function todoExtension(pi: ExtensionAPI): void {
 			if (inProg > 0) text += `  ${theme.fg("accent", `\uf111 ${inProg} active`)}`;
 			if (done > 0) text += `  ${theme.fg("success", `\uf00c ${done} done`)}`;
 			return new Text(text, 0, 0);
+		},
+
+		renderResult(result, { expanded }, theme) {
+			return TodoViewComponent.renderTaskResult(result.details as TaskDetails | undefined, expanded, theme);
+		},
+	});
+
+	// ── Tool: todo_patch ───────────────────────────────────────────────────
+	pi.registerTool({
+		name: "todo_patch",
+		label: "Tasks",
+		description:
+			"Update existing tasks by ID without resending the whole list. " +
+			"Use for status flips, renames, priority changes, dependency edits, and rich-field updates. " +
+			"The whole patches array is atomic — all patches apply or none do.",
+		promptSnippet:
+			"Update one or more existing tasks by ID (status, priority, content, dependencies, rich fields) without resending the list",
+		promptGuidelines: [
+			"Use todo_patch to mark a task in_progress or completed, or to adjust one task's fields — do not resend the whole list for a status change.",
+			"Use appendDescription to add notes to a task without rewriting its description.",
+		],
+		parameters: TodoPatchParams,
+
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const live = store.tasks.filter((t) => t.deletedAt == null);
+			const liveById = new Map(live.map((t) => [t.id, t]));
+
+			// §3 whole-call rejections (first error wins; canonical state untouched).
+			const seen = new Set<string>();
+			for (const patch of params.patches) {
+				// 1. Unknown or tombstoned id — self-healing reject with the full list.
+				if (!liveById.has(patch.id)) {
+					return {
+						content: [{ type: "text", text: `todo_patch rejected: unknown or removed task id "${patch.id}".\n\n${formatListForLLM()}` }],
+						details: { tasks: [...store.tasks] } satisfies TaskDetails,
+					};
+				}
+				// 2. Duplicate id within one call — ambiguous ordering.
+				if (seen.has(patch.id)) {
+					return {
+						content: [{ type: "text", text: `todo_patch rejected: duplicate task id "${patch.id}" in one call.\n\n${formatListForLLM()}` }],
+						details: { tasks: [...store.tasks] } satisfies TaskDetails,
+					};
+				}
+				seen.add(patch.id);
+				// 3. description + appendDescription on the same patch — ambiguous.
+				if (patch.description !== undefined && patch.appendDescription !== undefined) {
+					return {
+						content: [{ type: "text", text: `todo_patch rejected: cannot set both description and appendDescription on task "${patch.id}".\n\n${formatListForLLM()}` }],
+						details: { tasks: [...store.tasks] } satisfies TaskDetails,
+					};
+				}
+				// 4. Malformed metadata container (mirrors the todo_write I1 preflight).
+				if (patch.metadata !== undefined) {
+					const preflight = validateMetadata(patch.metadata);
+					if (!preflight.ok) {
+						return {
+							content: [{ type: "text", text: preflight.error }],
+							details: { tasks: [...store.tasks] } satisfies TaskDetails,
+						};
+					}
+				}
+			}
+
+			// Desugar (spec §4): build the merged candidate list via the pure
+			// applyPatch, then run the exact same commit tail as todo_write.
+			const patchesById = new Map(params.patches.map((p) => [p.id, p]));
+			const merged: Task[] = live.map((t) => {
+				const patch = patchesById.get(t.id);
+				return patch ? applyPatch(t, patch) : t;
+			});
+
+			// §3.5 — dependency cycle after the blockedBy merge → atomic reject,
+			// same error shape as todo_write. Also strips unknown/self/dup deps
+			// with the standard warnings.
+			const validation = validateDependencyGraph(merged);
+			if (!validation.ok) {
+				return {
+					content: [{ type: "text", text: validation.error }],
+					details: { tasks: [...store.tasks] } satisfies TaskDetails,
+				};
+			}
+
+			const details = commitTaskList(validation.tasks, ctx);
+
+			// §6 — terse delta content, NOT formatListForLLM(). The model resyncs
+			// from the per-turn prompt re-injection at the next turn boundary.
+			const liveNow = store.tasks.filter((t) => t.deletedAt == null);
+			const active = liveNow.filter((t) => t.status === "in_progress").length;
+			const pending = liveNow.filter((t) => t.status === "pending").length;
+			const blocked = liveNow.filter((t) => t.status === "pending" && isBlocked(t, liveNow)).length;
+			const done = liveNow.filter((t) => t.status === "completed").length;
+
+			const changed = params.patches
+				.map((p) => {
+					const task = liveNow.find((t) => t.id === p.id);
+					return task ? `${task.id} → ${task.status}` : `${p.id} → ?`;
+				})
+				.join(", ");
+
+			let text = `Patched ${changed}.\n${active} active, ${pending} pending (${blocked} blocked), ${done} done.`;
+			const warning = formatStrippedWarning(validation.strippedUnknown);
+			if (warning) text += `\n\n${warning}`;
+			return { content: [{ type: "text", text }], details };
+		},
+
+		renderCall(args, theme) {
+			const patches = args.patches ?? [];
+			const max = 5;
+			const shown = patches.slice(0, max);
+			const segments = shown.map((p: TaskPatch) => {
+				const icon = p.status ? STATUS_ICON[p.status] : "\u270e";
+				const color =
+					p.status === "completed" ? "success" : p.status === "in_progress" ? "accent" : "muted";
+				return theme.fg(color, `${icon} ${p.id}${p.status ? ` ${p.status}` : ""}`);
+			});
+			const rest =
+				patches.length > max ? `  ${theme.fg("muted", `+${patches.length - max} more`)}` : "";
+			return new Text(
+				theme.fg("toolTitle", theme.bold("todo_patch ")) + segments.join("  ") + rest,
+				0,
+				0,
+			);
 		},
 
 		renderResult(result, { expanded }, theme) {

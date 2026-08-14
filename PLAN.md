@@ -40,7 +40,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ## Outcome map
 
-- [ ] **M11.1** — Implement `todo_patch` (schema, pure `applyPatch`, shared `commitTaskList`, register/execute, render, prompt guidelines)
+- [x] **M11.1** — Implement `todo_patch` (schema, pure `applyPatch`, shared `commitTaskList`, register/execute, render, prompt guidelines)
 - [ ] **M11.2** — Replay inclusion + full §9 test obligations (equivalence, symmetry/replay, atomicity, B1, timestamps, e2e)
 - [ ] **M11.3** — Docs rollout (README, CHANGELOG, ROADMAP, AGENTS lesson if warranted)
 
@@ -54,6 +54,8 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 - `src/patch.test.ts` seeded by parent at T1 acceptance; T4 expands to full §9 (equivalence, tool-entry §3 rejects).
 
 ## Gate log
+
+- **2026-08-14T00:19Z — M11-T2 accepted; M11.1 complete pending protected review.** Worker bd1cc038 wired todo_patch via shared commitTaskList in src/index.ts (prompt guidelines live in registerTool; src/prompt.ts unchanged). npm test 368 passed. Deferred: widen runtime.processToolResult for todo_patch (currently commitTaskList passes gate-compatible "todo_write" for widget refresh).
 
 - **2026-08-14 — scheduler.mode → hard.** M11-T2/T4 use `effort: hard`; standard mode defers them as `route_unavailable`. Mode raised so hard tasks can schedule (ceilings.hard remains 1).
 
@@ -207,20 +209,21 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
         "ceiling": 2,
         "effort": "hard",
         "receipt": {
-          "artifactPath": null,
+          "artifactPath": "/home/quzma/.pi/agent/sessions/--home-quzma-.pi-agent-extensions-pi-todo--/subagent-artifacts/outputs/call-360f294f-7b2a-4266-bc61-dddade0f3d31-100fc_13c1db47-95d0-9050-bd53-965388984daa_1/M11-T2.md",
           "basisDagHash": "sha256:1c014f0d502405f5b08a3ee12aee3dbb52fbc89c5ca643a6842570c8073d126f",
           "capabilityHash": "sha256:663eca05e409cb503ab7dadd3534a8419e1baf46f9fd4884dd007c775e5d9896",
-          "outputState": null,
-          "receiptClass": null,
+          "model": "deepseek/deepseek-v4-flash:max",
+          "outputState": "present",
+          "receiptClass": "child_result",
           "requestedRoute": {
             "role": "worker"
           },
-          "runId": null,
-          "source": null,
-          "success": null,
+          "runId": "bd1cc038",
+          "source": "foreground",
+          "success": true,
           "waveId": "sha256:0f5e055f2def84c4ddf9615e6a801a9823a2f8f356a304aec0fec00bd534db5a"
         },
-        "status": "in_flight",
+        "status": "accepted",
         "supersedes": null
       }
     },
@@ -269,7 +272,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
         "ceiling": 2,
         "effort": "normal",
         "receipt": null,
-        "status": "blocked",
+        "status": "ready",
         "supersedes": null
       }
     },
