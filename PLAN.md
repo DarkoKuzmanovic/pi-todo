@@ -55,6 +55,8 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ## Gate log
 
+- **2026-08-14T00:26Z — M11-T3 accepted.** TODO_PATCH added to replay recognition set; TODO_SNAPSHOT_VERSION stays 1. npm test 369 passed. Round-trip proof deferred to T4.
+
 - **2026-08-14T00:24Z — M11.1 review PASS (delta).** Initial FIX-FIRST (self-heal rejects + metadata warnings) fixed in 11f1406; delta reviewer ea2ccd07 PASS. Review-dispatches: 2/2 for M11.1 boundary used.
 
 - **2026-08-14T00:19Z — M11-T2 accepted; M11.1 complete pending protected review.** Worker bd1cc038 wired todo_patch via shared commitTaskList in src/index.ts (prompt guidelines live in registerTool; src/prompt.ts unchanged). npm test 368 passed. Deferred: widen runtime.processToolResult for todo_patch (currently commitTaskList passes gate-compatible "todo_write" for widget refresh).
@@ -274,20 +276,21 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
         "ceiling": 2,
         "effort": "normal",
         "receipt": {
-          "artifactPath": null,
+          "artifactPath": "/home/quzma/.pi/agent/sessions/--home-quzma-.pi-agent-extensions-pi-todo--/subagent-artifacts/outputs/call-82e4b8e6-79a5-4899-a44d-bccf7ea781db-126fc_e931f2d8-fdc3-9ddb-bb36-2fc017697385_1/M11-T3.md",
           "basisDagHash": "sha256:31f38ab9564496280172051c96ad885c0e73076c2b01ef654afb28556ddd6c5d",
           "capabilityHash": "sha256:663eca05e409cb503ab7dadd3534a8419e1baf46f9fd4884dd007c775e5d9896",
-          "outputState": null,
-          "receiptClass": null,
+          "model": "deepseek/deepseek-v4-flash:max",
+          "outputState": "present",
+          "receiptClass": "child_result",
           "requestedRoute": {
             "role": "worker"
           },
-          "runId": null,
-          "source": null,
-          "success": null,
+          "runId": "5b354407",
+          "source": "foreground",
+          "success": true,
           "waveId": "sha256:2e31fae47ca35cb101c2015152d7d5c86cf71294de7335c5103a6fc8b98c1bc5"
         },
-        "status": "in_flight",
+        "status": "accepted",
         "supersedes": null
       }
     },
@@ -345,7 +348,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
         "ceiling": 2,
         "effort": "hard",
         "receipt": null,
-        "status": "blocked",
+        "status": "ready",
         "supersedes": null
       }
     },

@@ -5,6 +5,7 @@ import type { TaskDetails } from "./types";
 /** Tool names whose result details carry the authoritative task list. */
 export const TODO_WRITE = "todo_write";
 export const TODO_REMOVE = "todo_remove";
+export const TODO_PATCH = "todo_patch";
 
 /** Custom session entry type for extension-owned task snapshots. */
 export const TODO_SNAPSHOT_CUSTOM_TYPE = "pi-todo:snapshot";
@@ -14,7 +15,7 @@ export const TODO_SNAPSHOT_VERSION = 1;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type TodoToolName = typeof TODO_WRITE | typeof TODO_REMOVE;
+export type TodoToolName = typeof TODO_WRITE | typeof TODO_REMOVE | typeof TODO_PATCH;
 
 export interface TodoSnapshotData {
 	version: typeof TODO_SNAPSHOT_VERSION;
@@ -110,7 +111,7 @@ function readSnapshotDetails(data: unknown): unknown {
 }
 
 function isTodoToolName(value: unknown): value is TodoToolName {
-	return value === TODO_WRITE || value === TODO_REMOVE;
+	return value === TODO_WRITE || value === TODO_REMOVE || value === TODO_PATCH;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
