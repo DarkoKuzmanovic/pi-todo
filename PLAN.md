@@ -67,11 +67,11 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ```json
 {
-  "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
+  "baseRevision": "5ea31a90d495c1d14f1e8289081cb8c224bb277d",
   "budgets": {
     "dispatch": {
       "limit": 10,
-      "used": 2
+      "used": 3
     },
     "replan": {
       "limit": 3,
@@ -131,7 +131,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T1",
       "state": {
         "attempts": 1,
-        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
+        "baseRevision": "5ea31a90d495c1d14f1e8289081cb8c224bb277d",
         "ceiling": 2,
         "effort": "normal",
         "receipt": {
@@ -207,7 +207,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T2",
       "state": {
         "attempts": 1,
-        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
+        "baseRevision": "5ea31a90d495c1d14f1e8289081cb8c224bb277d",
         "ceiling": 2,
         "effort": "hard",
         "receipt": {
@@ -269,12 +269,25 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "contractHash": "sha256:97fbc5f16e4a9c9c1ace4912f3010311957ecaa12d4d036b10152c52357b50a5",
       "id": "M11-T3",
       "state": {
-        "attempts": 0,
-        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
+        "attempts": 1,
+        "baseRevision": "5ea31a90d495c1d14f1e8289081cb8c224bb277d",
         "ceiling": 2,
         "effort": "normal",
-        "receipt": null,
-        "status": "ready",
+        "receipt": {
+          "artifactPath": null,
+          "basisDagHash": "sha256:31f38ab9564496280172051c96ad885c0e73076c2b01ef654afb28556ddd6c5d",
+          "capabilityHash": "sha256:663eca05e409cb503ab7dadd3534a8419e1baf46f9fd4884dd007c775e5d9896",
+          "outputState": null,
+          "receiptClass": null,
+          "requestedRoute": {
+            "role": "worker"
+          },
+          "runId": null,
+          "source": null,
+          "success": null,
+          "waveId": "sha256:2e31fae47ca35cb101c2015152d7d5c86cf71294de7335c5103a6fc8b98c1bc5"
+        },
+        "status": "in_flight",
         "supersedes": null
       }
     },
@@ -328,7 +341,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T4",
       "state": {
         "attempts": 0,
-        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
+        "baseRevision": "5ea31a90d495c1d14f1e8289081cb8c224bb277d",
         "ceiling": 2,
         "effort": "hard",
         "receipt": null,
@@ -381,7 +394,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T5",
       "state": {
         "attempts": 0,
-        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
+        "baseRevision": "5ea31a90d495c1d14f1e8289081cb8c224bb277d",
         "ceiling": 2,
         "effort": "micro",
         "receipt": null,
