@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyPatch } from "./patch";
+import { applyPatch as applyPatchRaw } from "./patch";
 import type { Task } from "./types";
+
+function applyPatch(task: Task, patch: Parameters<typeof applyPatchRaw>[1]): Task {
+	return applyPatchRaw(task, patch).task;
+}
 
 function base(overrides: Partial<Task> = {}): Task {
 	return {
@@ -91,4 +95,17 @@ describe("applyPatch (M11 pure merge rules)", () => {
 		});
 		expect(next.metadata).toBeUndefined();
 	});
+
+	it("returns I1 drop warnings from metadata merge", () => {
+		const { task, dropped } = applyPatchRaw(base({ metadata: { keep: true } }), {
+			id: "t1",
+			metadata: {
+				keep: null,
+				nested: { x: 1 } as unknown as string,
+			},
+		});
+		expect(task.metadata).toBeUndefined();
+		expect(dropped.some((d) => d.includes("nested"))).toBe(true);
+	});
+
 });

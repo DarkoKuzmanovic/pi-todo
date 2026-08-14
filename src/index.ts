@@ -328,7 +328,12 @@ export default function todoExtension(pi: ExtensionAPI): void {
 					const preflight = validateMetadata(patch.metadata);
 					if (!preflight.ok) {
 						return {
-							content: [{ type: "text", text: preflight.error }],
+							content: [
+								{
+									type: "text",
+									text: `${preflight.error}\n\n${formatListForLLM()}`,
+								},
+							],
 							details: { tasks: [...store.tasks] } satisfies TaskDetails,
 						};
 					}
@@ -338,9 +343,13 @@ export default function todoExtension(pi: ExtensionAPI): void {
 			// Desugar (spec §4): build the merged candidate list via the pure
 			// applyPatch, then run the exact same commit tail as todo_write.
 			const patchesById = new Map(params.patches.map((p) => [p.id, p]));
+			const metadataWarnings: string[] = [];
 			const merged: Task[] = live.map((t) => {
 				const patch = patchesById.get(t.id);
-				return patch ? applyPatch(t, patch) : t;
+				if (!patch) return t;
+				const result = applyPatch(t, patch);
+				metadataWarnings.push(...result.dropped);
+				return result.task;
 			});
 
 			// §3.5 — dependency cycle after the blockedBy merge → atomic reject,
@@ -349,7 +358,12 @@ export default function todoExtension(pi: ExtensionAPI): void {
 			const validation = validateDependencyGraph(merged);
 			if (!validation.ok) {
 				return {
-					content: [{ type: "text", text: validation.error }],
+					content: [
+						{
+							type: "text",
+							text: `${validation.error}\n\n${formatListForLLM()}`,
+						},
+					],
 					details: { tasks: [...store.tasks] } satisfies TaskDetails,
 				};
 			}
@@ -374,6 +388,7 @@ export default function todoExtension(pi: ExtensionAPI): void {
 			let text = `Patched ${changed}.\n${active} active, ${pending} pending (${blocked} blocked), ${done} done.`;
 			const warning = formatStrippedWarning(validation.strippedUnknown);
 			if (warning) text += `\n\n${warning}`;
+			if (metadataWarnings.length > 0) text += `\n\n${metadataWarnings.join("\n")}`;
 			return { content: [{ type: "text", text }], details };
 		},
 

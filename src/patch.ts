@@ -48,15 +48,27 @@ function applyStringField(next: Task, key: "description" | "owner" | "activeForm
 }
 
 /**
- * Apply one patch to one task and return the resulting task.
+ * Result of applying one patch. `dropped` carries I1 per-key metadata
+ * warning strings (same shape as `validateMetadata(...).dropped`) so the
+ * tool layer can warn-and-continue without a second validation pass.
+ */
+export interface ApplyPatchResult {
+	task: Task;
+	dropped: string[];
+}
+
+/**
+ * Apply one patch to one task and return the resulting task plus any I1
+ * metadata drop warnings.
  *
  * Pure: the input task is never mutated; a shallow-copied `Task` is returned.
  * Metadata merge splits `null` delete markers out BEFORE `validateMetadata`
  * runs on the remainder, so the stored bag stays I1-clean (flat
  * `string|number|boolean`, no nulls, invalid keys dropped).
  */
-export function applyPatch(task: Task, patch: TaskPatch): Task {
+export function applyPatch(task: Task, patch: TaskPatch): ApplyPatchResult {
 	const next: Task = { ...task };
+	const dropped: string[] = [];
 
 	if (patch.status !== undefined) next.status = patch.status;
 	if (patch.priority !== undefined) next.priority = patch.priority;
@@ -89,12 +101,19 @@ export function applyPatch(task: Task, patch: TaskPatch): Task {
 		}
 		// I1 per-key policy on the merged remainder: invalid keys are dropped.
 		const validated = validateMetadata(merged);
-		if (validated.metadata === undefined) {
-			delete next.metadata;
+		if (validated.ok) {
+			dropped.push(...validated.dropped);
+			if (validated.metadata === undefined) {
+				delete next.metadata;
+			} else {
+				next.metadata = validated.metadata;
+			}
 		} else {
-			next.metadata = validated.metadata;
+			// Container malformed after merge — should be unreachable when the
+			// tool preflights the patch bag; leave metadata unchanged.
+			dropped.push(validated.error);
 		}
 	}
 
-	return next;
+	return { task: next, dropped };
 }
