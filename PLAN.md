@@ -55,13 +55,15 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ## Gate log
 
+- **2026-08-14 — scheduler.mode → hard.** M11-T2/T4 use `effort: hard`; standard mode defers them as `route_unavailable`. Mode raised so hard tasks can schedule (ceilings.hard remains 1).
+
 - **2026-08-14T00:14Z — M11-T1 accepted.** Worker 96262f99 delivered src/schemas.ts + src/patch.ts (recovered from worktree transcript after cleanup). Parent added src/patch.test.ts (7 cases) for T1 acceptance; T4 expands §9. npm test: 368 passed. Outcome review deferred until M11.1 (after T2).
 
 ## Crew v2 active DAG
 
 ```json
 {
-  "baseRevision": "636526f9cd095c7bf52806c14e97f81984d56c66",
+  "baseRevision": "f48a7f4cd74662215bec676b5c31b9de1ee230fc",
   "budgets": {
     "dispatch": {
       "limit": 10,
@@ -79,7 +81,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "readers": 2,
       "writers": 1
     },
-    "mode": "standard",
+    "mode": "hard",
     "ordering": "outcome-task-id-v1"
   },
   "tasks": [
@@ -125,7 +127,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T1",
       "state": {
         "attempts": 1,
-        "baseRevision": "636526f9cd095c7bf52806c14e97f81984d56c66",
+        "baseRevision": "f48a7f4cd74662215bec676b5c31b9de1ee230fc",
         "ceiling": 2,
         "effort": "normal",
         "receipt": {
@@ -201,7 +203,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T2",
       "state": {
         "attempts": 0,
-        "baseRevision": "636526f9cd095c7bf52806c14e97f81984d56c66",
+        "baseRevision": "f48a7f4cd74662215bec676b5c31b9de1ee230fc",
         "ceiling": 2,
         "effort": "hard",
         "receipt": null,
@@ -250,7 +252,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T3",
       "state": {
         "attempts": 0,
-        "baseRevision": "636526f9cd095c7bf52806c14e97f81984d56c66",
+        "baseRevision": "f48a7f4cd74662215bec676b5c31b9de1ee230fc",
         "ceiling": 2,
         "effort": "normal",
         "receipt": null,
@@ -308,7 +310,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T4",
       "state": {
         "attempts": 0,
-        "baseRevision": "636526f9cd095c7bf52806c14e97f81984d56c66",
+        "baseRevision": "f48a7f4cd74662215bec676b5c31b9de1ee230fc",
         "ceiling": 2,
         "effort": "hard",
         "receipt": null,
@@ -361,7 +363,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T5",
       "state": {
         "attempts": 0,
-        "baseRevision": "636526f9cd095c7bf52806c14e97f81984d56c66",
+        "baseRevision": "f48a7f4cd74662215bec676b5c31b9de1ee230fc",
         "ceiling": 2,
         "effort": "micro",
         "receipt": null,
