@@ -55,6 +55,8 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ## Gate log
 
+- **2026-08-14T00:24Z — M11.1 review PASS (delta).** Initial FIX-FIRST (self-heal rejects + metadata warnings) fixed in 11f1406; delta reviewer ea2ccd07 PASS. Review-dispatches: 2/2 for M11.1 boundary used.
+
 - **2026-08-14T00:19Z — M11-T2 accepted; M11.1 complete pending protected review.** Worker bd1cc038 wired todo_patch via shared commitTaskList in src/index.ts (prompt guidelines live in registerTool; src/prompt.ts unchanged). npm test 368 passed. Deferred: widen runtime.processToolResult for todo_patch (currently commitTaskList passes gate-compatible "todo_write" for widget refresh).
 
 - **2026-08-14 — scheduler.mode → hard.** M11-T2/T4 use `effort: hard`; standard mode defers them as `route_unavailable`. Mode raised so hard tasks can schedule (ceilings.hard remains 1).
@@ -65,7 +67,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ```json
 {
-  "baseRevision": "3a4fa5bd94a4a67ae91e6505848e5c21b907682d",
+  "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
   "budgets": {
     "dispatch": {
       "limit": 10,
@@ -129,7 +131,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T1",
       "state": {
         "attempts": 1,
-        "baseRevision": "3a4fa5bd94a4a67ae91e6505848e5c21b907682d",
+        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
         "ceiling": 2,
         "effort": "normal",
         "receipt": {
@@ -205,7 +207,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T2",
       "state": {
         "attempts": 1,
-        "baseRevision": "3a4fa5bd94a4a67ae91e6505848e5c21b907682d",
+        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
         "ceiling": 2,
         "effort": "hard",
         "receipt": {
@@ -268,7 +270,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T3",
       "state": {
         "attempts": 0,
-        "baseRevision": "3a4fa5bd94a4a67ae91e6505848e5c21b907682d",
+        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
         "ceiling": 2,
         "effort": "normal",
         "receipt": null,
@@ -326,7 +328,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T4",
       "state": {
         "attempts": 0,
-        "baseRevision": "3a4fa5bd94a4a67ae91e6505848e5c21b907682d",
+        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
         "ceiling": 2,
         "effort": "hard",
         "receipt": null,
@@ -379,7 +381,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T5",
       "state": {
         "attempts": 0,
-        "baseRevision": "3a4fa5bd94a4a67ae91e6505848e5c21b907682d",
+        "baseRevision": "11f14066219bde7c8a546612274f68632c98ce5d",
         "ceiling": 2,
         "effort": "micro",
         "receipt": null,
