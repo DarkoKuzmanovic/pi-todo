@@ -11,7 +11,7 @@ Run branch: `crew/m11-todo-patch`, cut from `crew/migrate-crew-conventions` @ `a
 | Risk | **contained protected** (public tool contract + silent replay-corruption invariant; shared `todo_write` commit-tail blast radius) |
 | Delivery | **local** — gated commits on the run branch only; no delivery push, no PR |
 | started-at | 2026-08-14T02:08:15+02:00 |
-| first-worker-at | *(pending)* |
+| first-worker-at | 2026-08-14T00:09:58.887Z (M11-T1 wave) |
 | completed-at | *(pending)* |
 
 **Evidence (scope checkpoint before any child dispatch):**
@@ -60,7 +60,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
   "budgets": {
     "dispatch": {
       "limit": 10,
-      "used": 0
+      "used": 1
     },
     "replan": {
       "limit": 3,
@@ -119,12 +119,25 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "contractHash": "sha256:aed153f362e61106199017146e5308b94e38b315f1d28e3d0afd08d929d19255",
       "id": "M11-T1",
       "state": {
-        "attempts": 0,
+        "attempts": 1,
         "baseRevision": "d3677d0c619ebbb58ca5c1e1bb0ae1a2f9aa8758",
         "ceiling": 2,
         "effort": "normal",
-        "receipt": null,
-        "status": "ready",
+        "receipt": {
+          "artifactPath": null,
+          "basisDagHash": "sha256:aaaf7dd97ba688f47726524d868b5ec64898e43e83e896734b4172634f22f323",
+          "capabilityHash": "sha256:663eca05e409cb503ab7dadd3534a8419e1baf46f9fd4884dd007c775e5d9896",
+          "outputState": null,
+          "receiptClass": null,
+          "requestedRoute": {
+            "role": "worker"
+          },
+          "runId": null,
+          "source": null,
+          "success": null,
+          "waveId": "sha256:573bf4a091b39fe76b15040f0d96a80221ab5ba0d8018010c3027ccc8b9fcba4"
+        },
+        "status": "in_flight",
         "supersedes": null
       }
     },
