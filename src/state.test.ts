@@ -264,7 +264,6 @@ describe("TodoStore", () => {
 		});
 
 		it("preserves already-set createdAt for brand-new tasks (no prev match)", () => {
-			const before = Date.now();
 			const input = [
 				makeTask({ id: "t-new", createdAt: 42 }),
 			];

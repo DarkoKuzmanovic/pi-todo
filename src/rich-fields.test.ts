@@ -252,7 +252,7 @@ describe("extractTasks — B1 type-preserving passthrough", () => {
 			],
 		});
 		expect(r?.[0].metadata).toEqual({ foo: "bar" });
-		expect((r?.[0] as unknown as Record<string, unknown>).extraUnknown).toBeUndefined();
+		expect((r?.[0] as unknown as Record<string, unknown> | undefined)?.extraUnknown).toBeUndefined();
 	});
 
 	it("metadata-less task → metadata undefined after extract", () => {
