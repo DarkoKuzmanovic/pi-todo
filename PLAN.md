@@ -56,7 +56,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ```json
 {
-  "baseRevision": "ac8996b74231fb2862ef10f825e70fefee06381c",
+  "baseRevision": "d3677d0c619ebbb58ca5c1e1bb0ae1a2f9aa8758",
   "budgets": {
     "dispatch": {
       "limit": 10,
@@ -120,7 +120,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T1",
       "state": {
         "attempts": 0,
-        "baseRevision": "ac8996b74231fb2862ef10f825e70fefee06381c",
+        "baseRevision": "d3677d0c619ebbb58ca5c1e1bb0ae1a2f9aa8758",
         "ceiling": 2,
         "effort": "normal",
         "receipt": null,
@@ -182,7 +182,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T2",
       "state": {
         "attempts": 0,
-        "baseRevision": "ac8996b74231fb2862ef10f825e70fefee06381c",
+        "baseRevision": "d3677d0c619ebbb58ca5c1e1bb0ae1a2f9aa8758",
         "ceiling": 2,
         "effort": "hard",
         "receipt": null,
@@ -231,7 +231,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T3",
       "state": {
         "attempts": 0,
-        "baseRevision": "ac8996b74231fb2862ef10f825e70fefee06381c",
+        "baseRevision": "d3677d0c619ebbb58ca5c1e1bb0ae1a2f9aa8758",
         "ceiling": 2,
         "effort": "normal",
         "receipt": null,
@@ -289,7 +289,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T4",
       "state": {
         "attempts": 0,
-        "baseRevision": "ac8996b74231fb2862ef10f825e70fefee06381c",
+        "baseRevision": "d3677d0c619ebbb58ca5c1e1bb0ae1a2f9aa8758",
         "ceiling": 2,
         "effort": "hard",
         "receipt": null,
@@ -342,7 +342,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "id": "M11-T5",
       "state": {
         "attempts": 0,
-        "baseRevision": "ac8996b74231fb2862ef10f825e70fefee06381c",
+        "baseRevision": "d3677d0c619ebbb58ca5c1e1bb0ae1a2f9aa8758",
         "ceiling": 2,
         "effort": "micro",
         "receipt": null,
