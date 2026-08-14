@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- M11 — `todo_patch` delta tool: targeted updates to existing tasks by ID without resending the whole list.
+  - Field semantics: `status`/`priority` replace; `content` renames; `blockedBy` replaces the whole array (`[]` clears); `description`/`owner`/`activeForm` replace (`""` clears); `appendDescription` appends `"\n\n" + text` (mutually exclusive with `description`); `metadata` merges per-key with `null` as a delete marker (never stored, I1 preserved).
+  - Atomic whole-call policy: unknown/tombstoned ids, duplicate ids, `description`+`appendDescription`, malformed metadata containers, and dependency cycles reject without changing canonical state; reject content includes the full list for self-healing.
+  - Desugars into the shared `todo_write` commit tail (spec §4): timestamps, B1 tombstone preservation, widget/tracker refresh, and replay behave identically to `todo_write`.
+  - Terse success content (`Patched t3 → completed.\n1 active, 2 pending (0 blocked), 9 done.`) keeps result tokens low; per-turn prompt re-injection resyncs the model.
+  - 34 new tests: pure merge/edge rules, equivalence with `todo_write(fullMergedList)`, replay/symmetry, atomicity/B1/timestamps through the entry point, and e2e plan→patch flow (403 total).
 - M4 — Optional rich task fields: `description`, `owner`, `activeForm`, `metadata` on tasks.
   - **description** — long-form notes, surfaces in `/todos` and compact widget only (not in prompt).
   - **activeForm** — short present-progressive label, used as the active-task label in the system prompt (I3 delimiter-safe) and in `/todos`.

@@ -16,8 +16,11 @@ A Pi CLI extension that gives the agent a structured task list to prevent **goal
 | Tool | Description |
 |------|-------------|
 | `todo_write` | Replace the entire task list (atomic update) — always pass all tasks |
+| `todo_patch` | Update existing tasks by ID without resending the list — status flips, renames, priority/dependency/rich-field edits. The whole `patches` array is atomic: all patches apply or none do |
 | `todo_read` | Read the current task list and statuses |
 | `todo_remove` | Soft-delete tasks by ID — hidden from active views but retained in history for audit/replay |
+
+**Plan / progress / remove contract:** plan with `todo_write` (the complete list), progress with `todo_patch` (targeted flips and single-task edits — do not resend the whole list for a status change), remove with `todo_remove` (soft-delete).
 
 ### Optional dependency metadata
 
@@ -44,6 +47,8 @@ In this example `t2` is unblocked only once `t1` is `completed`; `t3` is unblock
 - Dependencies on completed tasks are allowed and never produce a warning.
 - Dependency cycles are rejected atomically — the canonical store is not changed and the tool result reports the cycle.
 - `todo_remove` is now soft-delete (tombstones): removed tasks are hidden from all active views but retained in history and survive compaction/replay. A `blockedBy` reference to a tombstoned task no longer blocks the dependent; tombstoned dependency IDs are stripped from blockers on the next `todo_write`.
+
+**Patch semantics:** `todo_patch` replaces a task's entire `blockedBy` array in one go; pass `[]` to clear all dependencies. The same validation policy above applies to the merged list (atomic cycle reject, silent self/dup strip, unknown-ID warning).
 
 **Visible behavior:**
 
@@ -72,6 +77,14 @@ Each task may carry four additional optional fields for richer context, all omit
 - The whole task is rejected only if the metadata container itself is malformed (not an object).
 - On replay, types are preserved byte-identical: a `number` stays a `number`, a `boolean` stays a `boolean` (B1 invariant).
 - A malformed historical metadata entry is defensively re-validated and never crashes replay.
+
+### Patch semantics (M11)
+
+`todo_patch` mutates existing tasks by ID without resending the list:
+
+- `description`, `owner`, `activeForm` — replace the value; pass `""` to clear the field.
+- `appendDescription` — appends `"\n\n" + text` to the existing description; mutually exclusive with `description` on the same patch.
+- `metadata` — per-key shallow merge; a `null` value deletes that key (patch-boundary delete marker only — `null` is never stored, I1 preserved).
 
 ### Resurrection invariant
 

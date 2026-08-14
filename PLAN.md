@@ -42,7 +42,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 - [x] **M11.1** — Implement `todo_patch` (schema, pure `applyPatch`, shared `commitTaskList`, register/execute, render, prompt guidelines)
 - [x] **M11.2** — Replay inclusion + full §9 test obligations (equivalence, symmetry/replay, atomicity, B1, timestamps, e2e)
-- [ ] **M11.3** — Docs rollout (README, CHANGELOG, ROADMAP, AGENTS lesson if warranted)
+- [x] **M11.3** — Docs rollout (README, CHANGELOG, ROADMAP, AGENTS lesson if warranted)
 
 ## Deferred
 
@@ -54,6 +54,8 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 - `src/patch.test.ts` seeded by parent at T1 acceptance; T4 expands to full §9 (equivalence, tool-entry §3 rejects).
 
 ## Gate log
+
+- **2026-08-14T07:48Z — M11-T5 / M11.3 accepted.** Worker 35bce737 updated README, CHANGELOG, and ROADMAP; AGENTS.md stayed unchanged because T4 surfaced no new durable project lesson. Parent corrected the CHANGELOG success example to the exact terse result shape (including blocked count) and preserved the M11 spec link in ROADMAP Released. Freshness gates: README, ROADMAP, and CHANGELOG each passed `readme_toc.py --check` with balanced fences and no broken anchors; `git diff --check` passed. Documentation: README — tool table, plan/progress/remove contract, dependency clear, and rich-field patch semantics updated. AGENTS — no durable lesson delta.
 
 - **2026-08-14T07:36Z — M11.2 protected review PASS-WITH-NOTES.** Reviewer ce2093a8 found no blockers or should-fixes. It accepted §3 rejection coverage in `src/e2e.test.ts` as stronger equivalent evidence through the real registered tool path, with pure §2 rules remaining in `src/patch.test.ts`. Residual note: no independent static typecheck exists without a repo `tsconfig.json`; M11.3 docs remain required before release. Review-dispatches: 1/2 for M11.2 boundary used. Parent consulted the active Pi v24.15.0 `docs/extensions.md`, `docs/session-format.md`, `docs/sessions.md`, `docs/compaction.md`, `examples/extensions/README.md`, and shipped `todo.ts` example.
 
@@ -419,20 +421,21 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
         "ceiling": 2,
         "effort": "micro",
         "receipt": {
-          "artifactPath": null,
+          "artifactPath": "/home/quzma/.pi/agent/sessions/--home-quzma-.pi-agent-extensions-pi-todo--/subagent-artifacts/outputs/call_b2c9ETfpvGWdcdA82Z4q35gS|fc_01eef2a672bcf2d5016a7ec6f340a08191900e50f8cbd51abb/M11-T5.md",
           "basisDagHash": "sha256:bb55ad4df809de706e1b7ce7d3f56071865e151cab0be8e756db4b0998291500",
           "capabilityHash": "sha256:ce3b879c7678f904bec795a0781d7d3024dc1d18f557ec78098f11332171d0bc",
-          "outputState": null,
-          "receiptClass": null,
+          "model": "deepseek/deepseek-v4-flash:max",
+          "outputState": "present",
+          "receiptClass": "child_result",
           "requestedRoute": {
             "role": "worker"
           },
-          "runId": null,
-          "source": null,
-          "success": null,
+          "runId": "35bce737",
+          "source": "foreground",
+          "success": true,
           "waveId": "sha256:ea7a662db58778dad39b91d240ef63627f4647e3008a0282a50e44e25cd8f3f6"
         },
-        "status": "in_flight",
+        "status": "accepted",
         "supersedes": null
       }
     }
