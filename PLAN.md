@@ -50,7 +50,12 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
 
 ## Conventions
 
-*(none yet — append worker-discovered environmental workarounds here)*
+- Worktree may be removed before parent integration; recover file bodies from child transcript write/edit payloads.
+- `src/patch.test.ts` seeded by parent at T1 acceptance; T4 expands to full §9 (equivalence, tool-entry §3 rejects).
+
+## Gate log
+
+- **2026-08-14T00:14Z — M11-T1 accepted.** Worker 96262f99 delivered src/schemas.ts + src/patch.ts (recovered from worktree transcript after cleanup). Parent added src/patch.test.ts (7 cases) for T1 acceptance; T4 expands §9. npm test: 368 passed. Outcome review deferred until M11.1 (after T2).
 
 ## Crew v2 active DAG
 
@@ -124,20 +129,21 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
         "ceiling": 2,
         "effort": "normal",
         "receipt": {
-          "artifactPath": null,
+          "artifactPath": "/home/quzma/.pi/agent/sessions/--home-quzma-.pi-agent-extensions-pi-todo--/subagent-artifacts/outputs/call-4617a45e-8b34-42be-a772-948756c1e61a-61fc_4829fee1-30d7-99de-8fcb-e779a7b3c6d9_0/M11-T1.md",
           "basisDagHash": "sha256:aaaf7dd97ba688f47726524d868b5ec64898e43e83e896734b4172634f22f323",
           "capabilityHash": "sha256:663eca05e409cb503ab7dadd3534a8419e1baf46f9fd4884dd007c775e5d9896",
-          "outputState": null,
-          "receiptClass": null,
+          "model": "deepseek/deepseek-v4-flash:max",
+          "outputState": "present",
+          "receiptClass": "child_result",
           "requestedRoute": {
             "role": "worker"
           },
-          "runId": null,
-          "source": null,
-          "success": null,
+          "runId": "96262f99",
+          "source": "foreground",
+          "success": true,
           "waveId": "sha256:573bf4a091b39fe76b15040f0d96a80221ab5ba0d8018010c3027ccc8b9fcba4"
         },
-        "status": "in_flight",
+        "status": "accepted",
         "supersedes": null
       }
     },
@@ -199,7 +205,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
         "ceiling": 2,
         "effort": "hard",
         "receipt": null,
-        "status": "blocked",
+        "status": "ready",
         "supersedes": null
       }
     },

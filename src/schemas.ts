@@ -74,3 +74,81 @@ export const TodoRemoveParams = Type.Object({
 		description: "Task IDs to remove (soft-delete: tasks are stamped and retained in history for audit).",
 	}),
 });
+
+// ── M11 — todo_patch schema ───────────────────────────────────────────────────
+
+/**
+ * One targeted mutation of an existing task. Absent fields are unchanged;
+ * the patch never creates, deletes, or reorders tasks.
+ */
+export const TodoPatchItem = Type.Object({
+	id: Type.String({
+		description: "Task ID to patch; must be a live (non-tombstoned) task.",
+	}),
+	status: Type.Optional(
+		StringEnum(["pending", "in_progress", "completed"] as const, {
+			description: "New status. Replaces the current status.",
+		}),
+	),
+	priority: Type.Optional(
+		StringEnum(["high", "medium", "low"] as const, {
+			description: "New priority. Replaces the current priority.",
+		}),
+	),
+	content: Type.Optional(
+		Type.String({
+			description: "Rename: replaces the task content. Content is required on a task, so it cannot be cleared.",
+		}),
+	),
+	blockedBy: Type.Optional(
+		Type.Array(Type.String(), {
+			description: "REPLACES the task's whole blockedBy array. Pass [] to clear all dependencies.",
+		}),
+	),
+	description: Type.Optional(
+		Type.String({
+			description: "Replaces the description. Pass \"\" to clear it.",
+		}),
+	),
+	appendDescription: Type.Optional(
+		Type.String({
+			description:
+				"Appends \"\\n\\n\" + this text to the existing description. Mutually exclusive with description on the same patch.",
+		}),
+	),
+	owner: Type.Optional(
+		Type.String({
+			description: "Replaces the owner. Pass \"\" to clear it.",
+		}),
+	),
+	activeForm: Type.Optional(
+		Type.String({
+			description: "Replaces the activeForm label. Pass \"\" to clear it.",
+		}),
+	),
+	metadata: Type.Optional(
+		Type.Record(
+			Type.String(),
+			Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()]),
+			{
+				description:
+					"Per-key shallow merge into the task's metadata bag. A null value DELETES that key " +
+					"(patch-boundary delete marker only; null is never stored, I1 preserved). " +
+					"Invalid keys are dropped per-key with a warning (I1).",
+			},
+		),
+	),
+});
+
+/**
+ * M11 — todo_patch parameters. The whole patches array is atomic: all patches
+ * apply or none do. minItems 1 — an empty patch list is a caller error.
+ */
+export const TodoPatchParams = Type.Object({
+	patches: Type.Array(TodoPatchItem, {
+		minItems: 1,
+		description:
+			"Targeted updates to existing tasks by ID, without resending the whole list. " +
+			"All patches apply atomically or none do. Unknown IDs reject the whole call.",
+	}),
+});
