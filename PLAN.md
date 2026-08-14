@@ -73,7 +73,7 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
   "budgets": {
     "dispatch": {
       "limit": 10,
-      "used": 3
+      "used": 4
     },
     "replan": {
       "limit": 3,
@@ -343,12 +343,25 @@ Skipped by explicit user choice at start (spec §12 defaults already decided). R
       "contractHash": "sha256:2dfbd098a45513d74506dd39c731cfb99b93ef278c72aadfe782b1d9e32b220b",
       "id": "M11-T4",
       "state": {
-        "attempts": 0,
+        "attempts": 1,
         "baseRevision": "5ea31a90d495c1d14f1e8289081cb8c224bb277d",
         "ceiling": 2,
         "effort": "hard",
-        "receipt": null,
-        "status": "ready",
+        "receipt": {
+          "artifactPath": null,
+          "basisDagHash": "sha256:9db62ebdd70afa57f32fa0d8fb6a86aa2dd979990c1c417070192ca88affbbf5",
+          "capabilityHash": "sha256:ce3b879c7678f904bec795a0781d7d3024dc1d18f557ec78098f11332171d0bc",
+          "outputState": null,
+          "receiptClass": null,
+          "requestedRoute": {
+            "role": "worker"
+          },
+          "runId": null,
+          "source": null,
+          "success": null,
+          "waveId": "sha256:5eac2adb4b6c012792cc2ff4dfe4e7457144da8e784e23963ad565fc85c786b1"
+        },
+        "status": "in_flight",
         "supersedes": null
       }
     },
