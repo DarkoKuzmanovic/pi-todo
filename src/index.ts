@@ -316,7 +316,15 @@ export default function todoExtension(pi: ExtensionAPI): void {
 
 			// §3 whole-call rejections (first error wins; canonical state untouched).
 			const seen = new Set<string>();
+			const ambiguous = new Set(live.filter((t, i) => live.findIndex((u) => u.id === t.id) !== i).map((t) => t.id));
 			for (const patch of params.patches) {
+				// 0. An id shared by two live tasks (sessions written before duplicate ids were refused).
+				if (ambiguous.has(patch.id)) {
+					return {
+						content: [{ type: "text", text: `todo_patch rejected: task id "${patch.id}" belongs to more than one task; resend the list with todo_write and unique ids.\n\n${formatListForLLM()}` }],
+						details: { tasks: [...store.tasks] } satisfies TaskDetails,
+					};
+				}
 				// 1. Unknown or tombstoned id — self-healing reject with the full list.
 				if (!liveById.has(patch.id)) {
 					return {

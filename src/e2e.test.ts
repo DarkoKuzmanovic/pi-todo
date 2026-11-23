@@ -2022,6 +2022,17 @@ describe("M11-T4: todo_patch atomicity, B1, and timestamps through the entry poi
 		expect(todoStore.tasks).toEqual(before);
 	});
 
+	it("refuses to patch an id that two restored tasks share", async () => {
+		const ctx = await seed([{ id: "t1", content: "one", status: "pending", priority: "medium" }]);
+		todoStore.tasks.push({ id: "t1", content: "two", status: "pending", priority: "medium" });
+		const before = cloneStoreTasks();
+
+		const result = await callTodoPatch(mockPi, { patches: [{ id: "t1", status: "completed" }] }, ctx);
+
+		expect(result.content[0]?.text ?? "").toContain("belongs to more than one task");
+		expect(todoStore.tasks).toEqual(before);
+	});
+
 	it("rejects description + appendDescription on the same patch atomically", async () => {
 		const ctx = await seed([{ id: "t1", content: "one", status: "pending", priority: "medium" }]);
 		const before = cloneStoreTasks();

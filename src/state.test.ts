@@ -55,6 +55,13 @@ describe("TodoStore", () => {
 			expect(store.generateId()).toBe("t3");
 		});
 
+		it("ignores a huge numeric suffix so generateId keeps advancing", () => {
+			store.setTasks([makeTask({ id: `t${"9".repeat(400)}` }), makeTask({ id: "t2" })]);
+			store.syncIdCounter();
+			expect(store.generateId()).toBe("t3");
+			expect(store.generateId()).toBe("t4");
+		});
+
 		it("handles empty task list gracefully", () => {
 			store.setTasks([]);
 			store.syncIdCounter();

@@ -24,10 +24,9 @@ export class TodoStore {
 	syncIdCounter(): void {
 		for (const t of this.tasks) {
 			const match = /^t(\d+)$/.exec(t.id);
-			if (match) {
-				const [, digits] = match;
-				if (digits) this.idCounter = Math.max(this.idCounter, parseInt(digits, 10));
-			}
+			const n = Number(match?.[1]);
+			// A model-chosen id like "t999…9" must not push the counter to Infinity, where generateId stops advancing.
+			if (n < 1e9) this.idCounter = Math.max(this.idCounter, n);
 		}
 	}
 
