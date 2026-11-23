@@ -264,6 +264,40 @@ async function callTodoRemove(
 
 // ── Test suite ─────────────────────────────────────────────────────────────
 
+describe("todo_write ID uniqueness", () => {
+	it("reserves later explicit IDs before generating and patches only the target", async () => {
+		todoStore.tasks = [];
+		todoStore.idCounter = 0;
+		const mockPi = buildMockPi();
+		todoExtension(mockPi.pi);
+		const { ctx } = buildCtx([], false);
+		await callTodoWrite(mockPi, { tasks: [
+			{ content: "Generated", status: "pending", priority: "medium" },
+			{ id: "t1", content: "Explicit", status: "pending", priority: "medium" },
+		] }, ctx);
+		expect(todoStore.tasks.map((t) => t.id)).toEqual(["t2", "t1"]);
+		await mockPi.tools.get("todo_patch")!.execute("patch", { patches: [{ id: "t1", status: "completed" }] }, undefined, undefined, ctx);
+		expect(todoStore.tasks.map((t) => t.status)).toEqual(["pending", "completed"]);
+	});
+
+	it("rejects duplicate explicit IDs without changing tasks or ID counter", async () => {
+		todoStore.tasks = [makeTask({ id: "old" })];
+		todoStore.idCounter = 0;
+		const before = structuredClone(todoStore.tasks);
+		const mockPi = buildMockPi();
+		todoExtension(mockPi.pi);
+		const { ctx } = buildCtx([], false);
+		const result = await callTodoWrite(mockPi, { tasks: [
+			{ content: "Generated", status: "pending", priority: "medium" },
+			{ id: "dup", content: "One", status: "pending", priority: "medium" },
+			{ id: "dup", content: "Two", status: "pending", priority: "medium" },
+		] }, ctx);
+		expect(result.content[0].text).toMatch(/duplicate/i);
+		expect(todoStore.tasks).toEqual(before);
+		expect(todoStore.idCounter).toBe(0);
+	});
+});
+
 describe("M1-T4 end-to-end: post-compaction reconstructed state", () => {
 	let mockPi: MockPi;
 

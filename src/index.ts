@@ -190,13 +190,29 @@ export default function todoExtension(pi: ExtensionAPI): void {
 					};
 				}
 			}
+			const reserved = new Set<string>();
+			for (const t of params.tasks) {
+				if (t.id === undefined) continue;
+				if (reserved.has(t.id)) {
+					return {
+						content: [{ type: "text", text: `todo_write rejected: duplicate task id "${t.id}".` }],
+						details: { tasks: [...store.tasks] } satisfies TaskDetails,
+					};
+				}
+				reserved.add(t.id);
+			}
 			// Build candidate task list preserving any blockedBy metadata the agent sent.
 			// M4 — also coerce rich fields (description, owner, metadata, activeForm)
 			// at this input boundary and aggregate per-key metadata warnings.
 			const richWarnings: string[] = [];
 			const candidates: Task[] = params.tasks.map((t) => {
+				let id = t.id;
+				if (id === undefined) {
+					do { id = store.generateId(); } while (reserved.has(id));
+					reserved.add(id);
+				}
 				const next: Task = {
-					id: t.id ?? store.generateId(),
+					id,
 					content: t.content,
 					status: t.status as TaskStatus,
 					priority: t.priority as TaskPriority,
