@@ -5,7 +5,7 @@ A Pi CLI extension that gives the agent a structured task list to prevent **goal
 ## How it works
 
 1. The agent calls `todo_write` to plan multi-step work as an explicit task list
-2. Before every agent turn, active tasks are injected into the system prompt so the model always knows what remains and what it's currently doing
+2. At the start of each agent run, active tasks are injected into the system prompt as a snapshot; use `todo_read` or later tool results for the current plan
 3. A compact above-editor widget shows current progress, active task context, and all-done state
 4. State is reconstructed from the session branch, so `/tree` navigation and forking work correctly
 5. Task transitions drive completion notifications without changing the public tool API

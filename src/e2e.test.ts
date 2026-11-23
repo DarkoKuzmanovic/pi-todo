@@ -602,6 +602,16 @@ describe("M1-T4 end-to-end: post-compaction reconstructed state", () => {
 	// ── before_agent_start ──────────────────────────────────────────────
 
 	describe("before_agent_start after compaction", () => {
+		it("labels the injected plan as a run-start snapshot after a patch", async () => {
+			await callTodoWrite(mockPi, { tasks: [{ id: "t1", content: "Do work", status: "pending", priority: "medium" }] }, buildCtx([], false).ctx);
+			const handler = mockPi.handlers.get("before_agent_start")!;
+			const result = await handler({ systemPrompt: "BASE" }, buildCtx([], false).ctx) as { systemPrompt: string };
+			await mockPi.tools.get("todo_patch")!.execute("patch", { patches: [{ id: "t1", status: "completed" }] }, undefined, undefined, buildCtx([], false).ctx);
+			expect(result.systemPrompt).toMatch(/plan at (the )?start of (this|the) run/i);
+			expect(result.systemPrompt).toMatch(/todo_read/);
+			expect(result.systemPrompt).toMatch(/tool results/i);
+		});
+
 		it("injects the plan block from reconstructed active tasks", async () => {
 			const tasks = [
 				makeTask({ id: "t1", content: "Write design", status: "in_progress", priority: "high" }),

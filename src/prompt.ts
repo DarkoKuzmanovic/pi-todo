@@ -65,7 +65,8 @@ export function buildSystemPromptBlock(): string {
 	const lines: string[] = [
 		"## Your Plan",
 		"",
-		"Follow this plan in order. Mark each task \"in_progress\" before starting it, \"completed\" when done:",
+		"This is the plan at the start of this run; it may now be stale. Use todo_read or later tool results for the current state.",
+		"Follow the current plan in order. Mark each task \"in_progress\" before starting it, \"completed\" when done:",
 		"",
 	];
 

@@ -6,7 +6,7 @@
  *
  * How it works:
  *   1. The agent uses `todo_write` to plan multi-step work as structured tasks
- *   2. Before every agent turn, active tasks are injected into the system prompt
+ *   2. At each agent run start, a plan snapshot is injected into the system prompt
  *   3. A live widget above the editor shows the task list to the user
  *   4. State is stored in tool-result details and reconstructed from the session
  *      branch, so /tree navigation and forking work correctly
@@ -386,8 +386,7 @@ export default function todoExtension(pi: ExtensionAPI): void {
 
 			const details = commitTaskList(validation.tasks, ctx);
 
-			// §6 — terse delta content, NOT formatListForLLM(). The model resyncs
-			// from the per-turn prompt re-injection at the next turn boundary.
+			// The run-start snapshot may be stale; todo_read provides the current list.
 			const liveNow = store.tasks.filter((t) => t.deletedAt == null);
 			const active = liveNow.filter((t) => t.status === "in_progress").length;
 			const pending = liveNow.filter((t) => t.status === "pending").length;
