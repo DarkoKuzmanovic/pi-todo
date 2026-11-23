@@ -926,8 +926,8 @@ describe("M2-T4 end-to-end: blockedBy across todo_write, replay, compaction, pro
 		expect(prompt).toContain("Blocker");
 		// Blocked t2 / t3 are listed in a separate section.
 		expect(prompt).toContain("Blocked (waiting on dependencies):");
-		expect(prompt).toContain("[Blocked] [Medium] Blocked A");
-		expect(prompt).toContain("[Blocked] [Medium] Blocked B");
+		expect(prompt).toContain("[Blocked] [Medium] [t2] Blocked A");
+		expect(prompt).toContain("[Blocked] [Medium] [t3] Blocked B");
 	});
 
 	it("/todos LLM text appends (blocked by: ...) suffix for non-completed blocked tasks", async () => {
@@ -971,8 +971,8 @@ describe("M2-T4 end-to-end: blockedBy across todo_write, replay, compaction, pro
 			| undefined;
 		const prompt = r?.systemPrompt ?? "";
 		expect(prompt).toContain("Blocked (waiting on dependencies):");
-		expect(prompt).toContain("[Blocked] [Medium] Blocked A");
-		expect(prompt).toContain("[Blocked] [Medium] Blocked B");
+		expect(prompt).toContain("[Blocked] [Medium] [t2] Blocked A");
+		expect(prompt).toContain("[Blocked] [Medium] [t3] Blocked B");
 	});
 
 	it("completing a dependency unblocks its dependents after reconstruction", async () => {
