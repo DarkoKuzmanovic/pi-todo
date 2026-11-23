@@ -77,6 +77,18 @@ describe("buildSystemPromptBlock — M-c visibility (activeForm in prompt)", () 
 		singletonStore.tasks = [];
 	});
 
+	it("includes the IDs of active, pending and blocked tasks", () => {
+		singletonStore.tasks = [
+			makeTask({ id: "active-id", status: "in_progress", content: "Active" }),
+			makeTask({ id: "pending-id", content: "Pending" }),
+			makeTask({ id: "blocked-id", content: "Blocked task", blockedBy: ["pending-id"] }),
+		];
+		const block = buildSystemPromptBlock();
+		for (const [id, content] of [["active-id", "Active"], ["pending-id", "Pending"], ["blocked-id", "Blocked task"]]) {
+			expect(block.split("\n").find((line) => line.includes(content))).toContain(`[${id}]`);
+		}
+	});
+
 	it("uses activeForm as the active-task label when present", () => {
 		singletonStore.tasks = [
 			makeTask({ id: "a", status: "in_progress", content: "Fix bug", activeForm: "fixing the bug" }),

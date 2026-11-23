@@ -86,13 +86,13 @@ export function buildSystemPromptBlock(): string {
 		// Format: `<icon> [priority] <content>  ← <activeForm>` when activeForm is set,
 		//         `<icon> [priority] <content>  ← in progress` otherwise (back-compat).
 		const suffix = label ? `  ← ${label}` : "  ← in progress";
-		lines.push(`${icon} ${pLabel} ${t.content}${suffix}`);
+		lines.push(`${icon} ${pLabel} [${t.id}] ${t.content}${suffix}`);
 	}
 
 	for (const t of unblockedPending) {
 		const icon = STATUS_ICON.pending;
 		const pLabel = `[${priorityLabel(t.priority)}]`;
-		lines.push(`${icon} ${pLabel} ${t.content}`);
+		lines.push(`${icon} ${pLabel} [${t.id}] ${t.content}`);
 	}
 
 	if (blockedPending.length > 0) {
@@ -100,7 +100,7 @@ export function buildSystemPromptBlock(): string {
 		for (const t of blockedPending) {
 			const pLabel = `[${priorityLabel(t.priority)}]`;
 			const deps = activeBlockerIds(t, allTasks).join(", ");
-			lines.push(`⊘ [Blocked] ${pLabel} ${t.content}  (blocked by: ${deps})`);
+			lines.push(`⊘ [Blocked] ${pLabel} [${t.id}] ${t.content}  (blocked by: ${deps})`);
 		}
 	}
 
